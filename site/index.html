@@ -1,0 +1,347 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>赚钱效应 · Dashboard</title>
+  <meta name="description" content="A股赚钱效应：每日风格识别与持续性追踪" />
+  <style>
+    :root {
+      --bg: #0b1020;
+      --panel: rgba(255,255,255,.06);
+      --panel2: rgba(255,255,255,.09);
+      --text: #e7eaf2;
+      --muted: rgba(231,234,242,.72);
+      --line: rgba(255,255,255,.12);
+      --brand: #6ee7ff;
+      --good: #4ade80;
+      --warn: #fbbf24;
+      --bad: #fb7185;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji";
+      background: radial-gradient(900px 600px at 20% 0%, rgba(110,231,255,.10), transparent 60%),
+                  radial-gradient(900px 600px at 80% 10%, rgba(99,102,241,.12), transparent 55%),
+                  var(--bg);
+      color: var(--text);
+    }
+    a { color: var(--brand); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    header {
+      position: sticky;
+      top: 0;
+      backdrop-filter: blur(10px);
+      background: rgba(11,16,32,.65);
+      border-bottom: 1px solid var(--line);
+      z-index: 10;
+    }
+    .wrap { max-width: 1120px; margin: 0 auto; padding: 18px 16px; }
+    .topbar {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      justify-content: space-between;
+    }
+    .brand {
+      display: flex; align-items: baseline; gap: 10px;
+    }
+    .brand h1 { margin: 0; font-size: 18px; letter-spacing: .2px; }
+    .brand .badge { font-size: 12px; color: var(--muted); border: 1px solid var(--line); padding: 2px 8px; border-radius: 999px; }
+
+    .nav { display: flex; gap: 10px; }
+    .nav button {
+      border: 1px solid var(--line);
+      background: transparent;
+      color: var(--text);
+      padding: 8px 10px;
+      border-radius: 10px;
+      cursor: pointer;
+    }
+    .nav button[aria-current="page"] { background: var(--panel2); }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(12, 1fr);
+      gap: 12px;
+      padding: 18px 16px 32px;
+      max-width: 1120px;
+      margin: 0 auto;
+    }
+    .card {
+      border: 1px solid var(--line);
+      background: var(--panel);
+      border-radius: 14px;
+      padding: 14px;
+      box-shadow: 0 12px 30px rgba(0,0,0,.18);
+    }
+    .card h2 { margin: 0 0 10px; font-size: 14px; color: var(--muted); font-weight: 600; }
+    .hero { grid-column: 1 / -1; }
+    .hero .headline { font-size: 18px; margin: 0 0 6px; }
+    .hero .sub { margin: 0; color: var(--muted); font-size: 13px; }
+
+    .kpi { grid-column: span 3; }
+    .kpi .v { font-size: 22px; font-weight: 700; letter-spacing: .2px; }
+    .kpi .d { margin-top: 6px; color: var(--muted); font-size: 12px; }
+
+    .half { grid-column: span 6; min-height: 260px; }
+    .full { grid-column: 1 / -1; }
+
+    .row { display:flex; align-items: center; justify-content: space-between; gap: 10px; }
+    .pill { font-size: 12px; color: var(--muted); border: 1px solid var(--line); padding: 4px 10px; border-radius: 999px; }
+
+    table { width: 100%; border-collapse: collapse; }
+    th, td { border-bottom: 1px solid rgba(255,255,255,.08); padding: 10px 8px; font-size: 12px; text-align: left; }
+    th { color: var(--muted); font-weight: 600; }
+    .muted { color: var(--muted); }
+
+    .toolbar { display:flex; gap:10px; flex-wrap: wrap; align-items: center; }
+    input[type="search"], select {
+      background: rgba(255,255,255,.06);
+      border: 1px solid var(--line);
+      color: var(--text);
+      padding: 8px 10px;
+      border-radius: 10px;
+      outline: none;
+    }
+
+    .empty { color: var(--muted); font-size: 13px; padding: 10px 0; }
+
+    @media (max-width: 960px) {
+      .kpi { grid-column: span 6; }
+      .half { grid-column: 1 / -1; }
+    }
+  </style>
+</head>
+<body>
+<header>
+  <div class="wrap">
+    <div class="topbar">
+      <div class="brand">
+        <h1>赚钱效应</h1>
+        <span class="badge" id="asof">加载中…</span>
+      </div>
+      <nav class="nav" aria-label="Primary">
+        <button id="tab-today" aria-current="page">今日概览</button>
+        <button id="tab-trend">持续性</button>
+        <button id="tab-archive">归档</button>
+      </nav>
+    </div>
+  </div>
+</header>
+
+<main id="view"></main>
+
+<script>
+  const $ = (sel) => document.querySelector(sel);
+
+  const state = {
+    tab: 'today',
+    latest: null,
+    history: null,
+  };
+
+  async function fetchJson(url) {
+    const res = await fetch(url, { cache: 'no-cache' });
+    if (!res.ok) throw new Error(`HTTP ${res.status}: ${url}`);
+    return res.json();
+  }
+
+  function fmt(n) {
+    if (n == null || Number.isNaN(n)) return '—';
+    if (typeof n === 'string') return n;
+    return new Intl.NumberFormat('zh-CN').format(n);
+  }
+
+  function setTab(tab) {
+    state.tab = tab;
+    $('#tab-today').setAttribute('aria-current', tab === 'today' ? 'page' : 'false');
+    $('#tab-trend').setAttribute('aria-current', tab === 'trend' ? 'page' : 'false');
+    $('#tab-archive').setAttribute('aria-current', tab === 'archive' ? 'page' : 'false');
+    render();
+  }
+
+  function card(title, innerHtml, cls='card') {
+    const el = document.createElement('section');
+    el.className = cls;
+    el.innerHTML = `<h2>${title}</h2>` + innerHtml;
+    return el;
+  }
+
+  function renderToday() {
+    const d = state.latest;
+    const root = document.createElement('div');
+    root.className = 'grid';
+
+    root.appendChild(card('今日结论', `
+      <p class="headline">${d?.conclusion ?? '（待生成）'}</p>
+      <p class="sub">建议：先跑通数据/口径与展示结构，图表在 V1 补全。</p>
+    `, 'card hero'));
+
+    const kpis = [
+      { t: 'Top200 中位市值（元）', v: fmt(d?.kpi?.median_mktcap_cny), d: '市值口径：总市值；分层：<50亿 / 50-200亿 / >200亿' },
+      { t: 'Top200 中位成交额（元）', v: fmt(d?.kpi?.median_turnover_cny), d: '分层：>10亿 / 3-10亿 / <3亿' },
+      { t: '主导板块', v: d?.kpi?.dominant_board ?? '—', d: '上证 / 创业 / 科创（可扩展）' },
+      { t: '主导形态', v: d?.kpi?.dominant_pattern ?? '—', d: '规则识别（V1 迭代阈值）' },
+    ];
+    for (const k of kpis) {
+      const el = document.createElement('section');
+      el.className = 'card kpi';
+      el.innerHTML = `<h2>${k.t}</h2><div class="v">${k.v}</div><div class="d">${k.d}</div>`;
+      root.appendChild(el);
+    }
+
+    root.appendChild(card('分布图（占位）', `
+      <div class="muted">V1 将替换为：市值分层 / 成交额分层 / 形态分布（交互式图表）。</div>
+    `, 'card half'));
+
+    root.appendChild(card('Top200 表格（简版）', `
+      <div class="toolbar" style="margin: 6px 0 10px;">
+        <input id="q" type="search" placeholder="搜索：代码/名称" />
+        <select id="f-cap">
+          <option value="">市值段：全部</option>
+          <option value="micro">微盘&lt;50亿</option>
+          <option value="mid">中盘50-200亿</option>
+          <option value="large">大盘&gt;200亿</option>
+        </select>
+        <select id="f-turn">
+          <option value="">成交额段：全部</option>
+          <option value="big">&gt;10亿</option>
+          <option value="mid">3-10亿</option>
+          <option value="small">&lt;3亿</option>
+        </select>
+      </div>
+      <div style="overflow:auto; border: 1px solid rgba(255,255,255,.08); border-radius: 12px;">
+        <table>
+          <thead>
+            <tr>
+              <th>代码</th><th>名称</th><th>涨跌幅(%)</th><th>市值(亿)</th><th>成交额(亿)</th><th>板块</th><th>形态</th>
+            </tr>
+          </thead>
+          <tbody id="tb"></tbody>
+        </table>
+      </div>
+      <div id="empty" class="empty" style="display:none;">暂无数据（等数据生成器接入）。</div>
+    `, 'card full'));
+
+    // wire table
+    setTimeout(() => {
+      const rows = (d?.top200 ?? []).slice();
+      const q = $('#q');
+      const fCap = $('#f-cap');
+      const fTurn = $('#f-turn');
+      const tb = $('#tb');
+      const empty = $('#empty');
+
+      function capBucket(mktcap_yi) {
+        if (mktcap_yi == null) return '';
+        if (mktcap_yi < 50) return 'micro';
+        if (mktcap_yi <= 200) return 'mid';
+        return 'large';
+      }
+      function turnBucket(turn_yi) {
+        if (turn_yi == null) return '';
+        if (turn_yi > 10) return 'big';
+        if (turn_yi >= 3) return 'mid';
+        return 'small';
+      }
+
+      function renderTable() {
+        const qq = (q.value || '').trim().toLowerCase();
+        const cap = fCap.value;
+        const turn = fTurn.value;
+        const filtered = rows.filter(r => {
+          const okQ = !qq || String(r.ts_code||'').toLowerCase().includes(qq) || String(r.name||'').toLowerCase().includes(qq);
+          const okCap = !cap || capBucket(r.mktcap_yi) === cap;
+          const okTurn = !turn || turnBucket(r.turnover_yi) === turn;
+          return okQ && okCap && okTurn;
+        });
+
+        tb.innerHTML = filtered.map(r => `
+          <tr>
+            <td>${r.ts_code ?? ''}</td>
+            <td>${r.name ?? ''}</td>
+            <td>${r.pct_chg ?? ''}</td>
+            <td>${r.mktcap_yi ?? ''}</td>
+            <td>${r.turnover_yi ?? ''}</td>
+            <td>${r.board ?? ''}</td>
+            <td>${r.pattern ?? ''}</td>
+          </tr>
+        `).join('');
+
+        empty.style.display = (rows.length === 0) ? 'block' : 'none';
+      }
+
+      q?.addEventListener('input', renderTable);
+      fCap?.addEventListener('change', renderTable);
+      fTurn?.addEventListener('change', renderTable);
+      renderTable();
+    }, 0);
+
+    return root;
+  }
+
+  function renderTrend() {
+    const root = document.createElement('div');
+    root.className = 'grid';
+    root.appendChild(card('风格持续性（占位）', `
+      <div class="muted">V1：显示近20日主导风格表 + 关键指标趋势图。</div>
+    `, 'card full'));
+    return root;
+  }
+
+  function renderArchive() {
+    const root = document.createElement('div');
+    root.className = 'grid';
+    const items = state.history?.dates ?? [];
+    root.appendChild(card('历史归档', `
+      <div class="muted">点击日期查看当日页面（静态 JSON 驱动）。</div>
+      <div style="margin-top:10px; display:flex; flex-wrap:wrap; gap:10px;">
+        ${items.length ? items.map(d => `<a class="pill" href="?date=${encodeURIComponent(d)}">${d}</a>`).join('') : '<div class="empty">暂无归档（等生成器）。</div>'}
+      </div>
+    `, 'card full'));
+    return root;
+  }
+
+  function render() {
+    const view = $('#view');
+    view.innerHTML = '';
+    if (state.tab === 'today') view.appendChild(renderToday());
+    else if (state.tab === 'trend') view.appendChild(renderTrend());
+    else view.appendChild(renderArchive());
+  }
+
+  async function boot() {
+    $('#tab-today').addEventListener('click', () => setTab('today'));
+    $('#tab-trend').addEventListener('click', () => setTab('trend'));
+    $('#tab-archive').addEventListener('click', () => setTab('archive'));
+
+    const url = new URL(location.href);
+    const date = url.searchParams.get('date');
+
+    try {
+      state.history = await fetchJson('./data/index.json');
+    } catch (e) {
+      state.history = { dates: [] };
+    }
+
+    try {
+      if (date) {
+        state.latest = await fetchJson(`./data/${date}.json`);
+      } else {
+        state.latest = await fetchJson('./data/latest.json');
+      }
+      $('#asof').textContent = `更新：${state.latest?.date ?? '—'}`;
+    } catch (e) {
+      state.latest = { date: null, conclusion: null, kpi: {}, top200: [] };
+      $('#asof').textContent = '未找到数据（请先生成 data/latest.json）';
+    }
+
+    render();
+  }
+
+  boot();
+</script>
+</body>
+</html>

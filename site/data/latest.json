@@ -1,0 +1,13 @@
+{
+  "date": "2026-02-15",
+  "conclusion": "（示例数据）今日赚钱效应偏向：微盘 + 高换手，热点更集中，注意追高风险。",
+  "kpi": {
+    "median_mktcap_cny": 4200000000,
+    "median_turnover_cny": 540000000,
+    "dominant_board": "创业板",
+    "dominant_pattern": "低位突破"
+  },
+  "top200": [
+    {"ts_code": "000001.SZ", "name": "平安银行", "pct_chg": 2.1, "mktcap_yi": 1800, "turnover_yi": 55, "board": "上证", "pattern": "—"}
+  ]
+}
