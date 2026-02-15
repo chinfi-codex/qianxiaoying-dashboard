@@ -294,10 +294,11 @@
           return;
         }
 
-        g.innerHTML = keys.map(k => {
+        g.innerHTML = keys.map((k, gi) => {
           const items = groups[k] || [];
           const tiles = items.map((it, idx) => {
-            const id = `k_${k.replace(/\W/g,'_')}_${idx}`;
+            // IMPORTANT: Chinese labels are non-word chars; avoid id collisions by using group index.
+            const id = `k_g${gi}_${idx}`;
             return `
               <div class="tile">
                 <p class="name">${it.name || ''} <span class="muted">${it.ts_code || ''}</span></p>
@@ -319,10 +320,10 @@
 
         // render kline charts
         if (!window.echarts) return;
-        for (const k of keys) {
+        keys.forEach((k, gi) => {
           const items = groups[k] || [];
           items.forEach((it, idx) => {
-            const id = `k_${k.replace(/\W/g,'_')}_${idx}`;
+            const id = `k_g${gi}_${idx}`;
             const el = document.getElementById(id);
             if (!el) return;
             const kl = it.kline_120 || [];
@@ -365,7 +366,7 @@
             });
             window.addEventListener('resize', () => chart.resize(), { passive: true });
           });
-        }
+        });
       }
 
       renderCharts();
