@@ -140,6 +140,8 @@ def main():
     open_days = [x["cal_date"] for x in cal if int(x.get("is_open") or 0) == 1]
     if not open_days:
         raise RuntimeError("No open trading days found up to %s" % target)
+    # API ordering is not guaranteed; normalize
+    open_days = sorted(open_days)
     trade_date = open_days[-1]
 
     # universe
