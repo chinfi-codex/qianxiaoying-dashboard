@@ -415,6 +415,66 @@ def main():
     else:
         concl += "，形态分散"
 
+    # Build pattern gallery groups (top12 by pct per category), include 250-day qfq Kline
+    # For now: include for pattern != '—' only.
+
+    # compute 250d date range using trade_cal
+    hist_days = [d for d in open_days if d <= trade_date][-260:]
+    hist_start = hist_days[0] if hist_days else trade_date
+
+    def fetch_kline_250(code):
+        # fetch daily OHLCV + adj_factor between hist_start..trade_date
+        drows = _post(
+            "daily",
+            token,
+            {"ts_code": code, "start_date": hist_start, "end_date": trade_date},
+            fields="trade_date,open,high,low,close",
+        )
+        time.sleep(args.sleep)
+        arows = _post(
+            "adj_factor",
+            token,
+            {"ts_code": code, "start_date": hist_start, "end_date": trade_date},
+            fields="trade_date,adj_factor",
+        )
+        time.sleep(args.sleep)
+        af = {x["trade_date"]: x.get("adj_factor") for x in arows if x.get("trade_date")}
+        outk = []
+        for x in drows:
+            td = x.get("trade_date")
+            if not td or td not in af:
+                continue
+            f = float(af[td])
+            outk.append([
+                _to_date_ymd(td),
+                round(float(x.get("open")) * f, 4),
+                round(float(x.get("high")) * f, 4),
+                round(float(x.get("low")) * f, 4),
+                round(float(x.get("close")) * f, 4),
+            ])
+        outk.sort(key=lambda z: z[0])
+        # keep last 250
+        return outk[-250:]
+
+    pattern_groups = {}
+    # group candidates
+    pats = {}
+    for r in top200:
+        p = r.get("pattern")
+        if not p or p == "—":
+            continue
+        pats.setdefault(p, []).append(r)
+    for p, items in pats.items():
+        items = sorted(items, key=lambda x: x.get("pct_chg") or -999, reverse=True)[:12]
+        grp = []
+        for it in items:
+            grp.append({
+                "ts_code": it.get("ts_code"),
+                "name": it.get("name"),
+                "kline_250": fetch_kline_250(it.get("ts_code")),
+            })
+        pattern_groups[p] = grp
+
     out = {
         "date": _to_date_ymd(trade_date),
         "conclusion": concl,
@@ -425,6 +485,7 @@ def main():
             "dominant_pattern": dominant_pattern,
         },
         "top200": top200,
+        "pattern_groups": pattern_groups,
     }
 
     data_dir = os.path.join(os.path.dirname(__file__), "..", "site", "data")
