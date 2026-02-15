@@ -133,6 +133,7 @@
 
 <main id="view"></main>
 
+<script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
 <script>
   const $ = (sel) => document.querySelector(sel);
 
@@ -192,9 +193,20 @@
       root.appendChild(el);
     }
 
-    root.appendChild(card('分布图（占位）', `
-      <div class="muted">V1 将替换为：市值分层 / 成交额分层 / 形态分布（交互式图表）。</div>
+    root.appendChild(card('市值分层分布', `
+      <div id="chart-cap" style="height:240px;"></div>
+      <div class="muted">分层：微盘&lt;50亿 / 中盘50-200亿 / 大盘&gt;200亿（Top200 样本）。</div>
     `, 'card half'));
+
+    root.appendChild(card('成交额分层分布', `
+      <div id="chart-turn" style="height:240px;"></div>
+      <div class="muted">分层：&gt;10亿 / 3-10亿 / &lt;3亿（Top200 样本）。</div>
+    `, 'card half'));
+
+    root.appendChild(card('形态分布（规则版）', `
+      <div id="chart-pattern" style="height:260px;"></div>
+      <div class="muted">规则版 v0：连板/首板/低位突破/低位首板（其余为“—”）。</div>
+    `, 'card full'));
 
     root.appendChild(card('Top200 表格（简版）', `
       <div class="toolbar" style="margin: 6px 0 10px;">
@@ -225,7 +237,7 @@
       <div id="empty" class="empty" style="display:none;">暂无数据（等数据生成器接入）。</div>
     `, 'card full'));
 
-    // wire table
+    // wire table + charts
     setTimeout(() => {
       const rows = (d?.top200 ?? []).slice();
       const q = $('#q');
@@ -273,10 +285,75 @@
         empty.style.display = (rows.length === 0) ? 'block' : 'none';
       }
 
+      function countBy(getKey, order) {
+        const m = new Map();
+        for (const r of rows) {
+          const k = getKey(r) || '—';
+          m.set(k, (m.get(k) || 0) + 1);
+        }
+        const arr = Array.from(m.entries()).map(([k, v]) => ({ k, v }));
+        if (order) {
+          arr.sort((a,b) => order.indexOf(a.k) - order.indexOf(b.k));
+        } else {
+          arr.sort((a,b) => b.v - a.v);
+        }
+        return arr;
+      }
+
+      function renderCharts() {
+        if (!window.echarts) return;
+
+        // 市值分层
+        const capData = countBy(r => r.cap_bucket, ['微盘','中盘','大盘','—']);
+        const cap = echarts.init($('#chart-cap'));
+        cap.setOption({
+          backgroundColor: 'transparent',
+          grid: { left: 30, right: 12, top: 18, bottom: 28 },
+          xAxis: { type: 'category', data: capData.map(x => x.k), axisLabel: { color: 'rgba(231,234,242,.72)' }, axisLine: { lineStyle: { color: 'rgba(255,255,255,.12)' } } },
+          yAxis: { type: 'value', axisLabel: { color: 'rgba(231,234,242,.72)' }, splitLine: { lineStyle: { color: 'rgba(255,255,255,.08)' } } },
+          tooltip: { trigger: 'axis' },
+          series: [{ type: 'bar', data: capData.map(x => x.v), itemStyle: { color: 'rgba(110,231,255,.75)' }, barWidth: 28 }]
+        });
+
+        // 成交额分层
+        const turnData = countBy(r => r.turn_bucket, ['>10亿','3-10亿','<3亿','—']);
+        const turn = echarts.init($('#chart-turn'));
+        turn.setOption({
+          backgroundColor: 'transparent',
+          grid: { left: 30, right: 12, top: 18, bottom: 28 },
+          xAxis: { type: 'category', data: turnData.map(x => x.k), axisLabel: { color: 'rgba(231,234,242,.72)' }, axisLine: { lineStyle: { color: 'rgba(255,255,255,.12)' } } },
+          yAxis: { type: 'value', axisLabel: { color: 'rgba(231,234,242,.72)' }, splitLine: { lineStyle: { color: 'rgba(255,255,255,.08)' } } },
+          tooltip: { trigger: 'axis' },
+          series: [{ type: 'bar', data: turnData.map(x => x.v), itemStyle: { color: 'rgba(99,102,241,.75)' }, barWidth: 28 }]
+        });
+
+        // 形态分布
+        const patData = countBy(r => r.pattern);
+        const pat = echarts.init($('#chart-pattern'));
+        pat.setOption({
+          backgroundColor: 'transparent',
+          tooltip: { trigger: 'item' },
+          legend: { top: 8, textStyle: { color: 'rgba(231,234,242,.72)' } },
+          series: [{
+            type: 'pie',
+            radius: ['35%','70%'],
+            center: ['50%','60%'],
+            avoidLabelOverlap: true,
+            itemStyle: { borderColor: 'rgba(11,16,32,.65)', borderWidth: 2 },
+            label: { color: 'rgba(231,234,242,.82)' },
+            data: patData.map(x => ({ name: x.k, value: x.v }))
+          }]
+        });
+
+        // handle resize
+        window.addEventListener('resize', () => { cap.resize(); turn.resize(); pat.resize(); }, { passive: true });
+      }
+
       q?.addEventListener('input', renderTable);
       fCap?.addEventListener('change', renderTable);
       fTurn?.addEventListener('change', renderTable);
       renderTable();
+      renderCharts();
     }, 0);
 
     return root;
