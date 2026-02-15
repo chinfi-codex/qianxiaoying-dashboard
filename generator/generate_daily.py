@@ -163,19 +163,17 @@ def main():
     chunk = 500
     daily_rows = []
     adj_rows = []
-    basic_rows = []
+    # NOTE: daily_basic does NOT support comma-separated ts_code lists reliably.
+    # We'll fetch total_mv later for Top200 only (200 calls).
 
     for i in range(0, len(universe), chunk):
         codes = universe[i:i+chunk]
         code_str = ",".join(codes)
         daily_rows.extend(_post("daily", token, {"trade_date": trade_date, "ts_code": code_str},
-                               fields="ts_code,trade_date,close"))
+                               fields="ts_code,trade_date,close,amount"))
         time.sleep(args.sleep)
         adj_rows.extend(_post("adj_factor", token, {"trade_date": trade_date, "ts_code": code_str},
                              fields="ts_code,trade_date,adj_factor"))
-        time.sleep(args.sleep)
-        basic_rows.extend(_post("daily_basic", token, {"trade_date": trade_date, "ts_code": code_str},
-                               fields="ts_code,trade_date,amount,total_mv"))
         time.sleep(args.sleep)
 
     # previous open day for pct
@@ -195,7 +193,7 @@ def main():
 
     daily = {r["ts_code"]: r for r in daily_rows if r.get("ts_code")}
     adj = {r["ts_code"]: r for r in adj_rows if r.get("ts_code")}
-    basic = {r["ts_code"]: r for r in basic_rows if r.get("ts_code")}
+    basic = {}
 
     rows = []
     for ts_code, d in daily.items():
@@ -216,12 +214,12 @@ def main():
                 pct = (adj_close / p_adj_close - 1.0) * 100.0
 
         b = basic.get(ts_code) or {}
-        # amount: 千元 -> 元
-        amount = b.get("amount")
+        # turnover from daily.amount: 千元 -> 元
+        amount = d.get("amount")
         turnover_cny = float(amount) * 1000.0 if amount is not None else None
         turnover_yi = turnover_cny / 1e8 if turnover_cny is not None else None
 
-        # total_mv: 万元 -> 元
+        # total_mv from daily_basic.total_mv: 万元 -> 元
         total_mv = b.get("total_mv")
         mktcap_cny = float(total_mv) * 10000.0 if total_mv is not None else None
         mktcap_yi = mktcap_cny / 1e8 if mktcap_cny is not None else None
@@ -248,6 +246,37 @@ def main():
     rows.sort(key=lambda x: x.get("pct_chg"), reverse=True)
     top200 = rows[:200]
 
+    # fetch total_mv for all stocks on trade_date (paged), then fill Top200
+    mv_map = {}
+    offset = 0
+    limit = 5000
+    while True:
+        page = _post(
+            "daily_basic",
+            token,
+            {"trade_date": trade_date, "limit": limit, "offset": offset},
+            fields="ts_code,total_mv",
+        )
+        if not page:
+            break
+        for it in page:
+            if it.get("ts_code") and it.get("total_mv") is not None:
+                mv_map[it["ts_code"]] = float(it["total_mv"])
+        if len(page) < limit:
+            break
+        offset += limit
+        time.sleep(args.sleep)
+
+    for r in top200:
+        c = r["ts_code"]
+        total_mv = mv_map.get(c)
+        if total_mv is None:
+            continue
+        mktcap_cny = float(total_mv) * 10000.0
+        mktcap_yi = mktcap_cny / 1e8
+        r["mktcap_yi"] = round(mktcap_yi, 2)
+        r["cap_bucket"] = _cap_bucket_yi(mktcap_yi)
+
     med_mktcap_yi = _median([r.get("mktcap_yi") for r in top200])
     med_turn_yi = _median([r.get("turnover_yi") for r in top200])
 
@@ -259,14 +288,141 @@ def main():
     if board_cnt:
         dominant_board = sorted(board_cnt.items(), key=lambda kv: kv[1], reverse=True)[0][0]
 
+    # -----------------
+    # Pattern rules (v0): 连板 / 首板 / 低位突破 / 低位首板
+    # -----------------
+
+    # pick last 20 open days ending at trade_date
+    window_days = [d for d in open_days if d <= trade_date][-20:]
+    top_codes = [r["ts_code"] for r in top200]
+
+    # fetch qfq closes for window (top200 only)
+    close_map = {c: {} for c in top_codes}  # code -> {date: qfq_close}
+    # also need daily pct for limit-up approx (we use qfq pct like earlier)
+    qfq_pct_map = {c: {} for c in top_codes}  # code -> {date: pct}
+
+    for day in window_days:
+        # chunk calls
+        for i in range(0, len(top_codes), chunk):
+            codes = top_codes[i:i+chunk]
+            code_str = ",".join(codes)
+            drows = _post("daily", token, {"trade_date": day, "ts_code": code_str}, fields="ts_code,close")
+            time.sleep(args.sleep)
+            arows = _post("adj_factor", token, {"trade_date": day, "ts_code": code_str}, fields="ts_code,adj_factor")
+            time.sleep(args.sleep)
+            dmap = {x["ts_code"]: x.get("close") for x in drows if x.get("ts_code")}
+            amap = {x["ts_code"]: x.get("adj_factor") for x in arows if x.get("ts_code")}
+            for c in codes:
+                cl = dmap.get(c)
+                af = amap.get(c)
+                if cl is None or af is None:
+                    continue
+                close_map[c][day] = float(cl) * float(af)
+
+    # compute qfq pct series within window
+    for c in top_codes:
+        days = [d for d in window_days if d in close_map[c]]
+        days = sorted(days)
+        for idx in range(1, len(days)):
+            d0, d1 = days[idx-1], days[idx]
+            p0, p1 = close_map[c][d0], close_map[c][d1]
+            if p0 != 0:
+                qfq_pct_map[c][d1] = (p1 / p0 - 1.0) * 100.0
+
+    def limit_up_threshold(code):
+        b = _board(code)
+        # 创业/科创 20cm
+        if b in ("创业板", "科创板"):
+            return 19.8
+        return 9.8
+
+    def streak_limit_up(code):
+        # count consecutive limit-ups ending today
+        th = limit_up_threshold(code)
+        cnt = 0
+        # walk backwards in window_days
+        for d in reversed(window_days):
+            if d == window_days[0]:
+                # first day has no pct, skip break
+                pass
+            pct = qfq_pct_map.get(code, {}).get(d)
+            if pct is None:
+                # missing data breaks streak
+                break
+            if pct >= th:
+                cnt += 1
+            else:
+                break
+        return cnt
+
+    def low_breakout(code):
+        # simplified 20d low-position breakout using qfq close
+        series = close_map.get(code, {})
+        if trade_date not in series:
+            return False
+        # use available days in window
+        days = sorted([d for d in window_days if d in series])
+        if len(days) < 5:
+            return False
+        today_close = series[trade_date]
+        prev_days = [d for d in days if d < trade_date]
+        if len(prev_days) < 3:
+            return False
+        prev_closes = [series[d] for d in prev_days]
+        mx = max(prev_closes)
+        mn = min(prev_closes)
+        # breakout
+        if today_close <= mx:
+            return False
+        # low-position: within bottom 30% of (mn,mx) range
+        if mx == mn:
+            return False
+        pos = (today_close - mn) / (mx - mn)
+        return pos <= 0.3
+
+    pattern_cnt = {}
+    for r in top200:
+        c = r["ts_code"]
+        st = streak_limit_up(c)
+        r["streak"] = st
+        lb = low_breakout(c)
+        pat = "—"
+        if st >= 2:
+            pat = "连板"
+        elif st == 1:
+            pat = "首板"
+        if lb and pat == "—":
+            pat = "低位突破"
+        elif lb and pat == "首板":
+            pat = "低位首板"
+        r["pattern"] = pat
+        pattern_cnt[pat] = pattern_cnt.get(pat, 0) + 1
+
+    # dominant pattern (ignore '—' if possible)
+    dominant_pattern = None
+    if pattern_cnt:
+        items = [(k, v) for k, v in pattern_cnt.items() if k != "—"]
+        if not items:
+            items = list(pattern_cnt.items())
+        dominant_pattern = sorted(items, key=lambda kv: kv[1], reverse=True)[0][0]
+
+    # simple conclusion template
+    concl = "今日赚钱效应："
+    if dominant_board:
+        concl += "%s占优" % dominant_board
+    if dominant_pattern and dominant_pattern != "—":
+        concl += "，形态以%s为主" % dominant_pattern
+    else:
+        concl += "，形态分散"
+
     out = {
         "date": _to_date_ymd(trade_date),
-        "conclusion": "（自动生成占位）今日赚钱效应：待规则化结论。",
+        "conclusion": concl,
         "kpi": {
             "median_mktcap_cny": int(round(med_mktcap_yi * 1e8)) if med_mktcap_yi is not None else None,
             "median_turnover_cny": int(round(med_turn_yi * 1e8)) if med_turn_yi is not None else None,
             "dominant_board": dominant_board,
-            "dominant_pattern": "待定",
+            "dominant_pattern": dominant_pattern,
         },
         "top200": top200,
     }
