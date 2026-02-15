@@ -325,10 +325,20 @@
             const id = `k_${k.replace(/\W/g,'_')}_${idx}`;
             const el = document.getElementById(id);
             if (!el) return;
-            const kl = it.kline_250 || [];
-            // echarts candlestick expects [open, close, low, high]
+            const kl = it.kline_120 || [];
             const dates = kl.map(x => x[0]);
             const vals = kl.map(x => [x[1], x[4], x[3], x[2]]); // [open, close, low, high]
+            const closes = kl.map(x => x[4]);
+
+            const ma = (n) => closes.map((_, i) => {
+              if (i < n-1) return null;
+              let s = 0;
+              for (let k=i-n+1; k<=i; k++) s += closes[k];
+              return +(s/n).toFixed(4);
+            });
+
+            const ma5 = ma(5), ma20 = ma(20), ma60 = ma(60);
+
             const chart = echarts.init(el);
             chart.setOption({
               backgroundColor: 'transparent',
@@ -336,16 +346,22 @@
               xAxis: { type: 'category', data: dates, show: false },
               yAxis: { scale: true, show: false },
               tooltip: { trigger: 'axis', axisPointer: { type: 'cross' } },
-              series: [{
-                type: 'candlestick',
-                data: vals,
-                itemStyle: {
-                  color: 'rgba(74,222,128,.85)',
-                  color0: 'rgba(251,113,133,.85)',
-                  borderColor: 'rgba(74,222,128,.85)',
-                  borderColor0: 'rgba(251,113,133,.85)'
-                }
-              }]
+              series: [
+                {
+                  type: 'candlestick',
+                  data: vals,
+                  itemStyle: {
+                    // boss request: 红涨绿跌
+                    color: 'rgba(251,113,133,.90)',
+                    color0: 'rgba(74,222,128,.90)',
+                    borderColor: 'rgba(251,113,133,.90)',
+                    borderColor0: 'rgba(74,222,128,.90)'
+                  }
+                },
+                { type: 'line', data: ma5, showSymbol: false, smooth: true, lineStyle: { width: 1, color: 'rgba(110,231,255,.90)' } },
+                { type: 'line', data: ma20, showSymbol: false, smooth: true, lineStyle: { width: 1, color: 'rgba(99,102,241,.90)' } },
+                { type: 'line', data: ma60, showSymbol: false, smooth: true, lineStyle: { width: 1, color: 'rgba(251,191,36,.90)' } }
+              ]
             });
             window.addEventListener('resize', () => chart.resize(), { passive: true });
           });

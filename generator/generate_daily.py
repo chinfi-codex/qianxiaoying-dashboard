@@ -289,141 +289,36 @@ def main():
         dominant_board = sorted(board_cnt.items(), key=lambda kv: kv[1], reverse=True)[0][0]
 
     # -----------------
-    # Pattern rules (v0): 连板 / 首板 / 低位突破 / 低位首板
+    # Pattern rules (v1): per PRD quantitative definitions
+    # - wide box (120d) with 30% constraint
+    # - pos_120 low
+    # - 120d box breakout
+    # - 250d new high
+    # - high-position limit (sentiment high) via ret20/ret60
+    # - bottom lift-off
+    # - limit-up / streak
     # -----------------
 
-    # pick last 20 open days ending at trade_date
-    window_days = [d for d in open_days if d <= trade_date][-20:]
     top_codes = [r["ts_code"] for r in top200]
 
-    # fetch qfq closes for window (top200 only)
-    close_map = {c: {} for c in top_codes}  # code -> {date: qfq_close}
-    # also need daily pct for limit-up approx (we use qfq pct like earlier)
-    qfq_pct_map = {c: {} for c in top_codes}  # code -> {date: pct}
-
-    for day in window_days:
-        # chunk calls
-        for i in range(0, len(top_codes), chunk):
-            codes = top_codes[i:i+chunk]
-            code_str = ",".join(codes)
-            drows = _post("daily", token, {"trade_date": day, "ts_code": code_str}, fields="ts_code,close")
-            time.sleep(args.sleep)
-            arows = _post("adj_factor", token, {"trade_date": day, "ts_code": code_str}, fields="ts_code,adj_factor")
-            time.sleep(args.sleep)
-            dmap = {x["ts_code"]: x.get("close") for x in drows if x.get("ts_code")}
-            amap = {x["ts_code"]: x.get("adj_factor") for x in arows if x.get("ts_code")}
-            for c in codes:
-                cl = dmap.get(c)
-                af = amap.get(c)
-                if cl is None or af is None:
-                    continue
-                close_map[c][day] = float(cl) * float(af)
-
-    # compute qfq pct series within window
-    for c in top_codes:
-        days = [d for d in window_days if d in close_map[c]]
-        days = sorted(days)
-        for idx in range(1, len(days)):
-            d0, d1 = days[idx-1], days[idx]
-            p0, p1 = close_map[c][d0], close_map[c][d1]
-            if p0 != 0:
-                qfq_pct_map[c][d1] = (p1 / p0 - 1.0) * 100.0
+    # history window: last 260 open days up to trade_date (for 250d features)
+    hist_days = [d for d in open_days if d <= trade_date][-260:]
+    hist_start = hist_days[0] if hist_days else trade_date
 
     def limit_up_threshold(code):
         b = _board(code)
-        # 创业/科创 20cm
         if b in ("创业板", "科创板"):
             return 19.8
         return 9.8
 
-    def streak_limit_up(code):
-        # count consecutive limit-ups ending today
-        th = limit_up_threshold(code)
-        cnt = 0
-        # walk backwards in window_days
-        for d in reversed(window_days):
-            if d == window_days[0]:
-                # first day has no pct, skip break
-                pass
-            pct = qfq_pct_map.get(code, {}).get(d)
-            if pct is None:
-                # missing data breaks streak
-                break
-            if pct >= th:
-                cnt += 1
-            else:
-                break
-        return cnt
+    def to_ymd(d):
+        return _to_date_ymd(d)
 
-    def low_breakout(code):
-        # simplified 20d low-position breakout using qfq close
-        series = close_map.get(code, {})
-        if trade_date not in series:
-            return False
-        # use available days in window
-        days = sorted([d for d in window_days if d in series])
-        if len(days) < 5:
-            return False
-        today_close = series[trade_date]
-        prev_days = [d for d in days if d < trade_date]
-        if len(prev_days) < 3:
-            return False
-        prev_closes = [series[d] for d in prev_days]
-        mx = max(prev_closes)
-        mn = min(prev_closes)
-        # breakout
-        if today_close <= mx:
-            return False
-        # low-position: within bottom 30% of (mn,mx) range
-        if mx == mn:
-            return False
-        pos = (today_close - mn) / (mx - mn)
-        return pos <= 0.3
+    # Fetch qfq OHLC series for each code once; compute derived metrics
+    series_map = {}  # code -> list of dict(date, o,h,l,c)
+    close_map = {}   # code -> list of (date, close)
 
-    pattern_cnt = {}
-    for r in top200:
-        c = r["ts_code"]
-        st = streak_limit_up(c)
-        r["streak"] = st
-        lb = low_breakout(c)
-        pat = "—"
-        if st >= 2:
-            pat = "连板"
-        elif st == 1:
-            pat = "首板"
-        if lb and pat == "—":
-            pat = "低位突破"
-        elif lb and pat == "首板":
-            pat = "低位首板"
-        r["pattern"] = pat
-        pattern_cnt[pat] = pattern_cnt.get(pat, 0) + 1
-
-    # dominant pattern (ignore '—' if possible)
-    dominant_pattern = None
-    if pattern_cnt:
-        items = [(k, v) for k, v in pattern_cnt.items() if k != "—"]
-        if not items:
-            items = list(pattern_cnt.items())
-        dominant_pattern = sorted(items, key=lambda kv: kv[1], reverse=True)[0][0]
-
-    # simple conclusion template
-    concl = "今日赚钱效应："
-    if dominant_board:
-        concl += "%s占优" % dominant_board
-    if dominant_pattern and dominant_pattern != "—":
-        concl += "，形态以%s为主" % dominant_pattern
-    else:
-        concl += "，形态分散"
-
-    # Build pattern gallery groups (top12 by pct per category), include 250-day qfq Kline
-    # For now: include for pattern != '—' only.
-
-    # compute 250d date range using trade_cal
-    hist_days = [d for d in open_days if d <= trade_date][-260:]
-    hist_start = hist_days[0] if hist_days else trade_date
-
-    def fetch_kline_250(code):
-        # fetch daily OHLCV + adj_factor between hist_start..trade_date
+    for idx, code in enumerate(top_codes):
         drows = _post(
             "daily",
             token,
@@ -439,39 +334,246 @@ def main():
         )
         time.sleep(args.sleep)
         af = {x["trade_date"]: x.get("adj_factor") for x in arows if x.get("trade_date")}
-        outk = []
+        arr = []
         for x in drows:
             td = x.get("trade_date")
             if not td or td not in af:
                 continue
             f = float(af[td])
+            arr.append({
+                "date": td,
+                "o": float(x.get("open")) * f,
+                "h": float(x.get("high")) * f,
+                "l": float(x.get("low")) * f,
+                "c": float(x.get("close")) * f,
+            })
+        arr.sort(key=lambda z: z["date"])
+        if not arr:
+            continue
+        series_map[code] = arr
+        close_map[code] = [(z["date"], z["c"]) for z in arr]
+
+    def _slice_last(arr, n):
+        return arr[-n:] if len(arr) >= n else arr[:]
+
+    def _hhv(vals):
+        return max(vals) if vals else None
+
+    def _llv(vals):
+        return min(vals) if vals else None
+
+    def _ma(vals, n):
+        if len(vals) < n:
+            return None
+        return sum(vals[-n:]) / float(n)
+
+    def calc_pos_120(code):
+        arr = series_map.get(code) or []
+        arr120 = _slice_last(arr, 120)
+        hs = [z["h"] for z in arr120]
+        ls = [z["l"] for z in arr120]
+        hi = _hhv(hs)
+        lo = _llv(ls)
+        if hi is None or lo is None or hi == lo:
+            return None
+        c = arr120[-1]["c"]
+        return (c - lo) / (hi - lo)
+
+    def wide_box_120(code):
+        arr = series_map.get(code) or []
+        arr120 = _slice_last(arr, 120)
+        if len(arr120) < 60:
+            return False
+        upper = _hhv([z["h"] for z in arr120])
+        lower = _llv([z["l"] for z in arr120])
+        if upper is None or lower is None or upper == lower:
+            return False
+        height = upper - lower
+        mid = (upper + lower) / 2.0
+        mean_abs_dev = sum([abs(z["c"] - mid) for z in arr120]) / float(len(arr120)) / height
+        closes = [z["c"] for z in arr120]
+        band_width = (_hhv(closes) - _llv(closes)) / height
+        return (mean_abs_dev <= 0.30) and (band_width <= 0.30)
+
+    def box_breakout_120(code):
+        arr = series_map.get(code) or []
+        arr120 = _slice_last(arr, 120)
+        if len(arr120) < 60:
+            return False
+        upper = _hhv([z["h"] for z in arr120[:-1]])
+        if upper is None:
+            return False
+        return arr120[-1]["c"] > upper * 1.005
+
+    def new_high_250(code):
+        arr = series_map.get(code) or []
+        arr250 = _slice_last(arr, 250)
+        if len(arr250) < 120:
+            return False
+        prev_high = _hhv([z["h"] for z in arr250[:-1]])
+        if prev_high is None:
+            return False
+        return arr250[-1]["c"] > prev_high * 1.003
+
+    def ret_nd(code, n):
+        arr = series_map.get(code) or []
+        if len(arr) < n + 1:
+            return None
+        p0 = arr[-n-1]["c"]
+        p1 = arr[-1]["c"]
+        if p0 == 0:
+            return None
+        return (p1 / p0) - 1.0
+
+    def limit_streak(code):
+        arr = series_map.get(code) or []
+        if len(arr) < 2:
+            return 0
+        th = limit_up_threshold(code)
+        cnt = 0
+        # compute qfq pct day by day backwards
+        for i in range(len(arr)-1, 0, -1):
+            p1 = arr[i]["c"]
+            p0 = arr[i-1]["c"]
+            if p0 == 0:
+                break
+            pct = (p1 / p0 - 1.0) * 100.0
+            if pct >= th:
+                cnt += 1
+            else:
+                break
+        return cnt
+
+    def bottom_liftoff(code):
+        if not wide_box_120(code):
+            return False
+        pos = calc_pos_120(code)
+        if pos is None or pos > 0.25:
+            return False
+        arr = series_map.get(code) or []
+        closes = [z["c"] for z in arr]
+        ma20 = _ma(closes, 20)
+        if ma20 is None:
+            return False
+        # slope approx: ma20 today - ma20 10 days ago
+        if len(closes) < 30:
+            return False
+        ma20_prev = sum(closes[-30:-10]) / 20.0
+        slope = ma20 - ma20_prev
+        return (closes[-1] > ma20) and (slope > 0)
+
+    # Assign patterns with priority
+    priority = [
+        "连板",
+        "低位首板",
+        "首板",
+        "120日箱体突破",
+        "历史新高",
+        "低位突破",
+        "箱体底部启动",
+        "高位板",
+    ]
+
+    def pick_primary(labels):
+        for p in priority:
+            if p in labels:
+                return p
+        return "—"
+
+    pattern_cnt = {}
+    for r in top200:
+        c = r["ts_code"]
+        labels = []
+        st = limit_streak(c)
+        r["streak"] = st
+        if st >= 2:
+            labels.append("连板")
+        elif st == 1:
+            labels.append("首板")
+
+        pos = calc_pos_120(c)
+        is_low = (pos is not None and pos <= 0.30)
+
+        # low breakout
+        arr = series_map.get(c) or []
+        arr20 = _slice_last(arr, 20)
+        if len(arr20) >= 10:
+            prev_hhv = _hhv([z["c"] for z in arr20[:-1]])
+            if prev_hhv is not None and arr20[-1]["c"] > prev_hhv * 1.005 and is_low:
+                labels.append("低位突破")
+                if st == 1:
+                    labels.append("低位首板")
+
+        if wide_box_120(c) and box_breakout_120(c):
+            labels.append("120日箱体突破")
+
+        if new_high_250(c):
+            labels.append("历史新高")
+
+        # sentiment high-limit
+        r20 = ret_nd(c, 20)
+        r60 = ret_nd(c, 60)
+        if st >= 1 and ((r20 is not None and r20 >= 0.50) or (r60 is not None and r60 >= 1.00)):
+            labels.append("高位板")
+
+        if bottom_liftoff(c):
+            labels.append("箱体底部启动")
+
+        primary = pick_primary(labels)
+        r["pattern"] = primary
+        r["pattern_labels"] = labels
+        pattern_cnt[primary] = pattern_cnt.get(primary, 0) + 1
+
+    dominant_pattern = None
+    if pattern_cnt:
+        items = [(k, v) for k, v in pattern_cnt.items() if k != "—"]
+        if not items:
+            items = list(pattern_cnt.items())
+        dominant_pattern = sorted(items, key=lambda kv: kv[1], reverse=True)[0][0]
+
+    concl = "今日赚钱效应："
+    if dominant_board:
+        concl += "%s占优" % dominant_board
+    if dominant_pattern and dominant_pattern != "—":
+        concl += "，形态以%s为主" % dominant_pattern
+    else:
+        concl += "，形态分散"
+
+    # Build pattern gallery groups (top8 by pct per category), include 120-day qfq Kline.
+    # Candles will be colored on frontend: red=up, green=down.
+
+    def kline_120(code):
+        arr = series_map.get(code) or []
+        arr = arr[-120:]
+        outk = []
+        for z in arr:
             outk.append([
-                _to_date_ymd(td),
-                round(float(x.get("open")) * f, 4),
-                round(float(x.get("high")) * f, 4),
-                round(float(x.get("low")) * f, 4),
-                round(float(x.get("close")) * f, 4),
+                _to_date_ymd(z["date"]),
+                round(z["o"], 4),
+                round(z["h"], 4),
+                round(z["l"], 4),
+                round(z["c"], 4),
             ])
-        outk.sort(key=lambda z: z[0])
-        # keep last 250
-        return outk[-250:]
+        return outk
 
     pattern_groups = {}
-    # group candidates
     pats = {}
     for r in top200:
         p = r.get("pattern")
         if not p or p == "—":
             continue
         pats.setdefault(p, []).append(r)
+
     for p, items in pats.items():
-        items = sorted(items, key=lambda x: x.get("pct_chg") or -999, reverse=True)[:12]
+        items = sorted(items, key=lambda x: x.get("pct_chg") or -999, reverse=True)[:8]
         grp = []
         for it in items:
+            code = it.get("ts_code")
             grp.append({
-                "ts_code": it.get("ts_code"),
+                "ts_code": code,
                 "name": it.get("name"),
-                "kline_250": fetch_kline_250(it.get("ts_code")),
+                "pct_chg": it.get("pct_chg"),
+                "kline_120": kline_120(code),
             })
         pattern_groups[p] = grp
 
