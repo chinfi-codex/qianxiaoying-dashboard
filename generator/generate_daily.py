@@ -63,17 +63,15 @@ def _to_date_ymd(trade_date):
 
 
 def _board(ts_code):
-    if ts_code.endswith(".BJ"):
-        return "北交所"
+    """Map to 3 buckets per boss decision: 主板(沪深主板合并) / 创业板 / 科创板.
+    北交所已在上游剔除。
+    """
     code = ts_code.split(".")[0]
     if ts_code.endswith(".SH") and code.startswith("688"):
         return "科创板"
     if ts_code.endswith(".SZ") and code.startswith("300"):
         return "创业板"
-    if ts_code.endswith(".SH"):
-        return "上证"
-    # default: treat SZ as 创业/深主板; prd wants three boards, we map remaining SZ to 创业? better: 深市并入创业板会误导
-    return "上证"
+    return "主板"
 
 
 def _cap_bucket_yi(mktcap_yi):

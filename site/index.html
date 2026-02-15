@@ -182,7 +182,7 @@
     const kpis = [
       { t: 'Top200 中位市值（元）', v: fmt(d?.kpi?.median_mktcap_cny), d: '市值口径：总市值；分层：<50亿 / 50-200亿 / >200亿' },
       { t: 'Top200 中位成交额（元）', v: fmt(d?.kpi?.median_turnover_cny), d: '分层：>10亿 / 3-10亿 / <3亿' },
-      { t: '主导板块', v: d?.kpi?.dominant_board ?? '—', d: '上证 / 创业 / 科创（可扩展）' },
+      { t: '主导板块', v: d?.kpi?.dominant_board ?? '—', d: '主板（沪深合并）/ 创业板 / 科创板' },
       { t: '主导形态', v: d?.kpi?.dominant_pattern ?? '—', d: '规则识别（V1 迭代阈值）' },
     ];
     for (const k of kpis) {
