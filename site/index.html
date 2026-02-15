@@ -208,82 +208,9 @@
       <div class="muted">规则版 v0：连板/首板/低位突破/低位首板（其余为“—”）。</div>
     `, 'card full'));
 
-    root.appendChild(card('Top200 表格（简版）', `
-      <div class="toolbar" style="margin: 6px 0 10px;">
-        <input id="q" type="search" placeholder="搜索：代码/名称" />
-        <select id="f-cap">
-          <option value="">市值段：全部</option>
-          <option value="micro">微盘&lt;50亿</option>
-          <option value="mid">中盘50-200亿</option>
-          <option value="large">大盘&gt;200亿</option>
-        </select>
-        <select id="f-turn">
-          <option value="">成交额段：全部</option>
-          <option value="big">&gt;10亿</option>
-          <option value="mid">3-10亿</option>
-          <option value="small">&lt;3亿</option>
-        </select>
-      </div>
-      <div style="overflow:auto; border: 1px solid rgba(255,255,255,.08); border-radius: 12px;">
-        <table>
-          <thead>
-            <tr>
-              <th>代码</th><th>名称</th><th>涨跌幅(%)</th><th>市值(亿)</th><th>成交额(亿)</th><th>板块</th><th>形态</th>
-            </tr>
-          </thead>
-          <tbody id="tb"></tbody>
-        </table>
-      </div>
-      <div id="empty" class="empty" style="display:none;">暂无数据（等数据生成器接入）。</div>
-    `, 'card full'));
-
-    // wire table + charts
+    // wire charts
     setTimeout(() => {
       const rows = (d?.top200 ?? []).slice();
-      const q = $('#q');
-      const fCap = $('#f-cap');
-      const fTurn = $('#f-turn');
-      const tb = $('#tb');
-      const empty = $('#empty');
-
-      function capBucket(mktcap_yi) {
-        if (mktcap_yi == null) return '';
-        if (mktcap_yi < 50) return 'micro';
-        if (mktcap_yi <= 200) return 'mid';
-        return 'large';
-      }
-      function turnBucket(turn_yi) {
-        if (turn_yi == null) return '';
-        if (turn_yi > 10) return 'big';
-        if (turn_yi >= 3) return 'mid';
-        return 'small';
-      }
-
-      function renderTable() {
-        const qq = (q.value || '').trim().toLowerCase();
-        const cap = fCap.value;
-        const turn = fTurn.value;
-        const filtered = rows.filter(r => {
-          const okQ = !qq || String(r.ts_code||'').toLowerCase().includes(qq) || String(r.name||'').toLowerCase().includes(qq);
-          const okCap = !cap || capBucket(r.mktcap_yi) === cap;
-          const okTurn = !turn || turnBucket(r.turnover_yi) === turn;
-          return okQ && okCap && okTurn;
-        });
-
-        tb.innerHTML = filtered.map(r => `
-          <tr>
-            <td>${r.ts_code ?? ''}</td>
-            <td>${r.name ?? ''}</td>
-            <td>${r.pct_chg ?? ''}</td>
-            <td>${r.mktcap_yi ?? ''}</td>
-            <td>${r.turnover_yi ?? ''}</td>
-            <td>${r.board ?? ''}</td>
-            <td>${r.pattern ?? ''}</td>
-          </tr>
-        `).join('');
-
-        empty.style.display = (rows.length === 0) ? 'block' : 'none';
-      }
 
       function countBy(getKey, order) {
         const m = new Map();
@@ -303,56 +230,37 @@
       function renderCharts() {
         if (!window.echarts) return;
 
-        // 市值分层
+        const makePie = (el, data, title) => {
+          const chart = echarts.init(el);
+          chart.setOption({
+            backgroundColor: 'transparent',
+            tooltip: { trigger: 'item' },
+            legend: { top: 8, textStyle: { color: 'rgba(231,234,242,.72)' } },
+            series: [{
+              name: title,
+              type: 'pie',
+              radius: ['35%','70%'],
+              center: ['50%','60%'],
+              avoidLabelOverlap: true,
+              itemStyle: { borderColor: 'rgba(11,16,32,.65)', borderWidth: 2 },
+              label: { color: 'rgba(231,234,242,.82)' },
+              data: data.map(x => ({ name: x.k, value: x.v }))
+            }]
+          });
+          return chart;
+        };
+
         const capData = countBy(r => r.cap_bucket, ['微盘','中盘','大盘','—']);
-        const cap = echarts.init($('#chart-cap'));
-        cap.setOption({
-          backgroundColor: 'transparent',
-          grid: { left: 30, right: 12, top: 18, bottom: 28 },
-          xAxis: { type: 'category', data: capData.map(x => x.k), axisLabel: { color: 'rgba(231,234,242,.72)' }, axisLine: { lineStyle: { color: 'rgba(255,255,255,.12)' } } },
-          yAxis: { type: 'value', axisLabel: { color: 'rgba(231,234,242,.72)' }, splitLine: { lineStyle: { color: 'rgba(255,255,255,.08)' } } },
-          tooltip: { trigger: 'axis' },
-          series: [{ type: 'bar', data: capData.map(x => x.v), itemStyle: { color: 'rgba(110,231,255,.75)' }, barWidth: 28 }]
-        });
-
-        // 成交额分层
         const turnData = countBy(r => r.turn_bucket, ['>10亿','3-10亿','<3亿','—']);
-        const turn = echarts.init($('#chart-turn'));
-        turn.setOption({
-          backgroundColor: 'transparent',
-          grid: { left: 30, right: 12, top: 18, bottom: 28 },
-          xAxis: { type: 'category', data: turnData.map(x => x.k), axisLabel: { color: 'rgba(231,234,242,.72)' }, axisLine: { lineStyle: { color: 'rgba(255,255,255,.12)' } } },
-          yAxis: { type: 'value', axisLabel: { color: 'rgba(231,234,242,.72)' }, splitLine: { lineStyle: { color: 'rgba(255,255,255,.08)' } } },
-          tooltip: { trigger: 'axis' },
-          series: [{ type: 'bar', data: turnData.map(x => x.v), itemStyle: { color: 'rgba(99,102,241,.75)' }, barWidth: 28 }]
-        });
-
-        // 形态分布
         const patData = countBy(r => r.pattern);
-        const pat = echarts.init($('#chart-pattern'));
-        pat.setOption({
-          backgroundColor: 'transparent',
-          tooltip: { trigger: 'item' },
-          legend: { top: 8, textStyle: { color: 'rgba(231,234,242,.72)' } },
-          series: [{
-            type: 'pie',
-            radius: ['35%','70%'],
-            center: ['50%','60%'],
-            avoidLabelOverlap: true,
-            itemStyle: { borderColor: 'rgba(11,16,32,.65)', borderWidth: 2 },
-            label: { color: 'rgba(231,234,242,.82)' },
-            data: patData.map(x => ({ name: x.k, value: x.v }))
-          }]
-        });
 
-        // handle resize
+        const cap = makePie($('#chart-cap'), capData, '市值分层');
+        const turn = makePie($('#chart-turn'), turnData, '成交额分层');
+        const pat = makePie($('#chart-pattern'), patData, '形态分布');
+
         window.addEventListener('resize', () => { cap.resize(); turn.resize(); pat.resize(); }, { passive: true });
       }
 
-      q?.addEventListener('input', renderTable);
-      fCap?.addEventListener('change', renderTable);
-      fTurn?.addEventListener('change', renderTable);
-      renderTable();
       renderCharts();
     }, 0);
 
