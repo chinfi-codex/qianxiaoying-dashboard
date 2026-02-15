@@ -142,61 +142,52 @@ def main():
     open_days = sorted(open_days)
     trade_date = open_days[-1]
 
-    # universe
+    # stock_basic for names + ST filter
     sb = _post("stock_basic", token, {"list_status": "L"}, fields="ts_code,name")
-    universe = []
+    name_map = {x.get("ts_code"): x.get("name") for x in sb if x.get("ts_code")}
     st_set = set()
-    for x in sb:
-        ts_code = x.get("ts_code")
-        name = (x.get("name") or "").upper()
-        if not ts_code:
-            continue
-        if ts_code.endswith(".BJ"):
-            continue
-        # crude ST filter
-        if "ST" in name or "退" in name:
+    for ts_code, nm in name_map.items():
+        u = (nm or "").upper()
+        if "ST" in u or "退" in u:
             st_set.add(ts_code)
-            continue
-        universe.append(ts_code)
 
-    # fetch daily + adj_factor + daily_basic in chunks
-    chunk = 500
-    daily_rows = []
-    adj_rows = []
-    # NOTE: daily_basic does NOT support comma-separated ts_code lists reliably.
-    # We'll fetch total_mv later for Top200 only (200 calls).
+    # Fetch full-market daily + adj_factor with pagination (faster than per-code lists)
+    def fetch_paged(api_name, params, fields, limit=5000):
+        out = []
+        offset = 0
+        while True:
+            page = _post(api_name, token, dict(params, limit=limit, offset=offset), fields=fields)
+            if not page:
+                break
+            out.extend(page)
+            if len(page) < limit:
+                break
+            offset += limit
+            time.sleep(args.sleep)
+        return out
 
-    for i in range(0, len(universe), chunk):
-        codes = universe[i:i+chunk]
-        code_str = ",".join(codes)
-        daily_rows.extend(_post("daily", token, {"trade_date": trade_date, "ts_code": code_str},
-                               fields="ts_code,trade_date,close,amount"))
-        time.sleep(args.sleep)
-        adj_rows.extend(_post("adj_factor", token, {"trade_date": trade_date, "ts_code": code_str},
-                             fields="ts_code,trade_date,adj_factor"))
-        time.sleep(args.sleep)
+    daily_rows = fetch_paged("daily", {"trade_date": trade_date}, fields="ts_code,trade_date,close,amount")
+    adj_rows = fetch_paged("adj_factor", {"trade_date": trade_date}, fields="ts_code,trade_date,adj_factor")
 
     # previous open day for pct
     prev_date = open_days[-2] if len(open_days) >= 2 else None
-    prev_daily = {}
-    prev_adj = {}
-    if prev_date:
-        for i in range(0, len(universe), chunk):
-            codes = universe[i:i+chunk]
-            code_str = ",".join(codes)
-            for r in _post("daily", token, {"trade_date": prev_date, "ts_code": code_str}, fields="ts_code,close"):
-                prev_daily[r["ts_code"]] = r.get("close")
-            time.sleep(args.sleep)
-            for r in _post("adj_factor", token, {"trade_date": prev_date, "ts_code": code_str}, fields="ts_code,adj_factor"):
-                prev_adj[r["ts_code"]] = r.get("adj_factor")
-            time.sleep(args.sleep)
+    prev_daily_rows = fetch_paged("daily", {"trade_date": prev_date}, fields="ts_code,close") if prev_date else []
+    prev_adj_rows = fetch_paged("adj_factor", {"trade_date": prev_date}, fields="ts_code,adj_factor") if prev_date else []
+
+    prev_daily = {r["ts_code"]: r.get("close") for r in prev_daily_rows if r.get("ts_code")}
+    prev_adj = {r["ts_code"]: r.get("adj_factor") for r in prev_adj_rows if r.get("ts_code")}
 
     daily = {r["ts_code"]: r for r in daily_rows if r.get("ts_code")}
     adj = {r["ts_code"]: r for r in adj_rows if r.get("ts_code")}
     basic = {}
 
+    # fetch helper chunk size for later per-code history
+    chunk = 500
+
     rows = []
     for ts_code, d in daily.items():
+        if ts_code.endswith(".BJ"):
+            continue
         if ts_code in st_set:
             continue
         af = (adj.get(ts_code) or {}).get("adj_factor")
@@ -237,14 +228,13 @@ def main():
         })
 
     # fill names from stock_basic
-    name_map = {x.get("ts_code"): x.get("name") for x in sb if x.get("ts_code")}
     for r in rows:
         r["name"] = name_map.get(r["ts_code"], "")
 
-    # sort by pct desc; take top200
+    # sort by pct desc; take top100
     rows = [r for r in rows if r.get("pct_chg") is not None]
     rows.sort(key=lambda x: x.get("pct_chg"), reverse=True)
-    top200 = rows[:200]
+    top200 = rows[:100]  # keep key name for frontend compatibility
 
     # fetch total_mv for all stocks on trade_date (paged), then fill Top200
     mv_map = {}
