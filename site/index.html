@@ -86,7 +86,24 @@
     .kpi .d { margin-top: 6px; color: var(--muted); font-size: 12px; }
 
     .half { grid-column: span 6; min-height: 260px; }
+    .third { grid-column: span 4; min-height: 260px; }
     .full { grid-column: 1 / -1; }
+
+    .tiles { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+    .tile { border: 1px solid rgba(255,255,255,.10); border-radius: 14px; padding: 10px; background: rgba(255,255,255,.04); }
+    .tile .name { font-size: 13px; font-weight: 700; margin: 0 0 6px; }
+    .tile .meta { font-size: 12px; color: var(--muted); margin: 0 0 8px; }
+    .kbox { height: 160px; }
+
+    @media (max-width: 960px) {
+      .kpi { grid-column: span 6; }
+      .half { grid-column: 1 / -1; }
+      .third { grid-column: 1 / -1; }
+      .tiles { grid-template-columns: repeat(2, 1fr); }
+    }
+    @media (max-width: 520px) {
+      .tiles { grid-template-columns: 1fr; }
+    }
 
     .row { display:flex; align-items: center; justify-content: space-between; gap: 10px; }
     .pill { font-size: 12px; color: var(--muted); border: 1px solid var(--line); padding: 4px 10px; border-radius: 999px; }
@@ -196,19 +213,25 @@
     root.appendChild(card('市值分层分布', `
       <div id="chart-cap" style="height:240px;"></div>
       <div class="muted">分层：微盘&lt;50亿 / 中盘50-200亿 / 大盘&gt;200亿（Top200 样本）。</div>
-    `, 'card half'));
+    `, 'card third'));
 
     root.appendChild(card('成交额分层分布', `
       <div id="chart-turn" style="height:240px;"></div>
       <div class="muted">分层：&gt;10亿 / 3-10亿 / &lt;3亿（Top200 样本）。</div>
-    `, 'card half'));
+    `, 'card third'));
 
-    root.appendChild(card('形态分布（规则版）', `
-      <div id="chart-pattern" style="height:260px;"></div>
-      <div class="muted">规则版 v0：连板/首板/低位突破/低位首板（其余为“—”）。</div>
+    root.appendChild(card('形态分布', `
+      <div id="chart-pattern" style="height:240px;"></div>
+      <div class="muted">规则版 v1：按 PRD 形态量化方法分类。</div>
+    `, 'card third'));
+
+    // gallery
+    root.appendChild(card('形态样本（250日 K线）', `
+      <div class="muted">仅展示当日被形态方法命中的样本（每类取前12）。K线为前复权。</div>
+      <div id="gallery" style="margin-top:12px;"></div>
     `, 'card full'));
 
-    // wire charts
+    // wire charts + gallery
     setTimeout(() => {
       const rows = (d?.top200 ?? []).slice();
 
@@ -252,16 +275,85 @@
 
         const capData = countBy(r => r.cap_bucket, ['微盘','中盘','大盘','—']);
         const turnData = countBy(r => r.turn_bucket, ['>10亿','3-10亿','<3亿','—']);
-        const patData = countBy(r => r.pattern);
+        const patData = countBy(r => r.pattern).filter(x => x.k !== '—');
 
         const cap = makePie($('#chart-cap'), capData, '市值分层');
         const turn = makePie($('#chart-turn'), turnData, '成交额分层');
-        const pat = makePie($('#chart-pattern'), patData, '形态分布');
+        const pat = makePie($('#chart-pattern'), patData.length ? patData : [{k:'—',v:1}], '形态分布');
 
         window.addEventListener('resize', () => { cap.resize(); turn.resize(); pat.resize(); }, { passive: true });
       }
 
+      function renderGallery() {
+        const g = $('#gallery');
+        if (!g) return;
+        const groups = d?.pattern_groups || {};
+        const keys = Object.keys(groups);
+        if (!keys.length) {
+          g.innerHTML = `<div class="empty">暂无形态样本（等待生成器写入 pattern_groups）。</div>`;
+          return;
+        }
+
+        g.innerHTML = keys.map(k => {
+          const items = groups[k] || [];
+          const tiles = items.map((it, idx) => {
+            const id = `k_${k.replace(/\W/g,'_')}_${idx}`;
+            return `
+              <div class="tile">
+                <p class="name">${it.name || ''} <span class="muted">${it.ts_code || ''}</span></p>
+                <p class="meta">${k}</p>
+                <div id="${id}" class="kbox"></div>
+              </div>
+            `;
+          }).join('');
+          return `
+            <div style="margin-top:14px;">
+              <div class="row" style="margin-bottom:8px;">
+                <div style="font-weight:800;">${k}</div>
+                <div class="pill">${items.length} 只</div>
+              </div>
+              <div class="tiles">${tiles}</div>
+            </div>
+          `;
+        }).join('');
+
+        // render kline charts
+        if (!window.echarts) return;
+        for (const k of keys) {
+          const items = groups[k] || [];
+          items.forEach((it, idx) => {
+            const id = `k_${k.replace(/\W/g,'_')}_${idx}`;
+            const el = document.getElementById(id);
+            if (!el) return;
+            const kl = it.kline_250 || [];
+            // echarts candlestick expects [open, close, low, high]
+            const dates = kl.map(x => x[0]);
+            const vals = kl.map(x => [x[1], x[4], x[3], x[2]]); // [open, close, low, high]
+            const chart = echarts.init(el);
+            chart.setOption({
+              backgroundColor: 'transparent',
+              grid: { left: 6, right: 6, top: 8, bottom: 14 },
+              xAxis: { type: 'category', data: dates, show: false },
+              yAxis: { scale: true, show: false },
+              tooltip: { trigger: 'axis', axisPointer: { type: 'cross' } },
+              series: [{
+                type: 'candlestick',
+                data: vals,
+                itemStyle: {
+                  color: 'rgba(74,222,128,.85)',
+                  color0: 'rgba(251,113,133,.85)',
+                  borderColor: 'rgba(74,222,128,.85)',
+                  borderColor0: 'rgba(251,113,133,.85)'
+                }
+              }]
+            });
+            window.addEventListener('resize', () => chart.resize(), { passive: true });
+          });
+        }
+      }
+
       renderCharts();
+      renderGallery();
     }, 0);
 
     return root;
