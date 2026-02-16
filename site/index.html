@@ -159,6 +159,7 @@
   const state = {
     latest: null,
     history: null,
+    tradeCal: null,
   };
 
   async function fetchJson(url) {
@@ -206,9 +207,9 @@
     }
 
     root.appendChild(card('2) 大盘数据', `<div class="muted">三大指数K线 + 历史趋势（按 app.py 口径迁移）。</div>`, 'card full'));
-    root.appendChild(card('上证指数（近120）', `<div id="chart-idx-sh" style="height:260px;"></div>`, 'card third'));
-    root.appendChild(card('创业板指数（近120）', `<div id="chart-idx-cyb" style="height:260px;"></div>`, 'card third'));
-    root.appendChild(card('科创板指数（近120）', `<div id="chart-idx-kcb" style="height:260px;"></div>`, 'card third'));
+    root.appendChild(card('上证指数（近200）', `<div id="chart-idx-sh" style="height:260px;"></div>`, 'card third'));
+    root.appendChild(card('创业板指数（近200）', `<div id="chart-idx-cyb" style="height:260px;"></div>`, 'card third'));
+    root.appendChild(card('科创板指数（近200）', `<div id="chart-idx-kcb" style="height:260px;"></div>`, 'card third'));
     root.appendChild(card('创业板PE（近500）', `<div id="chart-gem-pe" style="height:260px;"></div>`, 'card full'));
 
     const kpis = [
@@ -697,6 +698,11 @@
       <div id="chart-top100-buckets" style="height:280px;"></div>
     `, 'card half'));
 
+    root.appendChild(card('涨幅Top100-市值分层', `<div id="chart-gainer-cap" style="height:240px;"></div>`, 'card half'));
+    root.appendChild(card('涨幅Top100-成交额分层', `<div id="chart-gainer-turn" style="height:240px;"></div>`, 'card half'));
+    root.appendChild(card('涨幅Top100-板块分布', `<div id="chart-gainer-board" style="height:240px;"></div>`, 'card half'));
+    root.appendChild(card('涨幅Top100-形态分布（含未归类）', `<div id="chart-gainer-pattern" style="height:240px;"></div>`, 'card half'));
+
     const mkRows = (arr, title) => {
       const rows = (arr || []).slice(0, 20).map((r, i) => {
         const name = r.name || '—';
@@ -761,6 +767,28 @@
         else val[6]++;
       }
       makeBar($('#chart-top100-buckets'), cats, val);
+
+      // gainer top100 2x2 analytics (PRD)
+      const gRows = Array.isArray(topGain) ? topGain : [];
+      const countBy = (arr, keyFn, order=null) => {
+        const m = new Map();
+        for (const r of arr) {
+          const k = keyFn(r) || '未归类';
+          m.set(k, (m.get(k) || 0) + 1);
+        }
+        let out = Array.from(m.entries()).map(([k,v]) => ({k,v}));
+        if (order) out.sort((a,b)=>order.indexOf(a.k)-order.indexOf(b.k));
+        return out;
+      };
+      const cap = countBy(gRows, r => r.cap_bucket, ['微盘','中盘','大盘','未归类']);
+      const turn = countBy(gRows, r => r.turn_bucket, ['>10亿','3-10亿','<3亿','未归类']);
+      const board = countBy(gRows, r => r.board, ['主板','创业板','科创板','未归类']);
+      const pattern = countBy(gRows, r => (r.pattern && r.pattern !== '—') ? r.pattern : '未归类');
+
+      makeBar($('#chart-gainer-cap'), cap.map(x=>x.k), cap.map(x=>x.v));
+      makeBar($('#chart-gainer-turn'), turn.map(x=>x.k), turn.map(x=>x.v));
+      makeBar($('#chart-gainer-board'), board.map(x=>x.k), board.map(x=>x.v));
+      makeBar($('#chart-gainer-pattern'), pattern.map(x=>x.k), pattern.map(x=>x.v));
     }, 0);
 
     return root;
@@ -881,12 +909,27 @@
     const dp = $('#datepick');
     if (dp && date) dp.value = date;
 
-    // Load button behavior: switch to 今日概览 after loading (boss choice: B)
+    // Load button behavior per PRD:
+    // 1) check trading day by trade_calendar.json
+    // 2) check generated data exists in index.json
     const loadBtn = $('#btn-load');
     if (loadBtn) {
       loadBtn.addEventListener('click', async () => {
         const d = dp?.value;
         if (!d) return;
+
+        const openDays = new Set((state.tradeCal?.open_days || []));
+        if (openDays.size && !openDays.has(d)) {
+          alert(`所选日期 ${d} 不是交易日`);
+          return;
+        }
+
+        const dates = new Set((state.history?.dates || []));
+        if (!dates.has(d)) {
+          alert(`当天数据未生成，请等待`);
+          return;
+        }
+
         try {
           state.latest = await fetchJson(`./data/${d}.json`);
           $('#asof').textContent = `更新：${state.latest?.date ?? '—'}`;
@@ -896,7 +939,7 @@
           render();
           window.scrollTo({ top: 0, behavior: 'smooth' });
         } catch (e) {
-          alert(`未找到数据：${d}`);
+          alert(`当天数据未生成，请等待`);
         }
       });
     }
@@ -915,6 +958,12 @@
       state.history = await fetchJson('./data/index.json');
     } catch (e) {
       state.history = { dates: [] };
+    }
+
+    try {
+      state.tradeCal = await fetchJson('./data/trade_calendar.json');
+    } catch (e) {
+      state.tradeCal = { open_days: [] };
     }
 
     try {

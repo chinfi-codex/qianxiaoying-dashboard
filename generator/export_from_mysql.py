@@ -12,8 +12,11 @@ Notes:
 """
 
 import argparse
+import datetime as dt
 import json
 import os
+
+import requests
 
 from db import load_daily_snapshot, list_snapshot_dates, get_market_history
 
@@ -21,6 +24,38 @@ from db import load_daily_snapshot, list_snapshot_dates, get_market_history
 def _ensure_dir(p):
     if not os.path.isdir(p):
         os.makedirs(p)
+
+
+def _build_trade_calendar(days_back=365, days_forward=30):
+    token = os.environ.get("TUSHARE_TOKEN")
+    if not token:
+        return {"generated_at": dt.datetime.now().isoformat(), "open_days": []}
+    end = dt.date.today() + dt.timedelta(days=days_forward)
+    start = dt.date.today() - dt.timedelta(days=days_back)
+    try:
+        r = requests.post(
+            "https://api.tushare.pro",
+            json={
+                "api_name": "trade_cal",
+                "token": token,
+                "params": {
+                    "exchange": "SSE",
+                    "start_date": start.strftime("%Y%m%d"),
+                    "end_date": end.strftime("%Y%m%d"),
+                },
+                "fields": "cal_date,is_open",
+            },
+            timeout=30,
+        )
+        r.raise_for_status()
+        j = r.json()
+        if j.get("code") != 0:
+            return {"generated_at": dt.datetime.now().isoformat(), "open_days": []}
+        items = (j.get("data") or {}).get("items") or []
+        open_days = sorted([f"{str(x[0])[:4]}-{str(x[0])[4:6]}-{str(x[0])[6:8]}" for x in items if int(x[1]) == 1])
+        return {"generated_at": dt.datetime.now().isoformat(), "open_days": open_days}
+    except Exception:
+        return {"generated_at": dt.datetime.now().isoformat(), "open_days": []}
 
 
 def main():
@@ -66,6 +101,10 @@ def main():
         idx = {"dates": dates}
         with open(os.path.join(data_dir, "index.json"), "w", encoding="utf-8") as f:
             json.dump(idx, f, ensure_ascii=False, indent=2)
+
+        cal = _build_trade_calendar(days_back=365, days_forward=45)
+        with open(os.path.join(data_dir, "trade_calendar.json"), "w", encoding="utf-8") as f:
+            json.dump(cal, f, ensure_ascii=False, indent=2)
 
     print("OK")
 

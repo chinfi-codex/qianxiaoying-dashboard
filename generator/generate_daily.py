@@ -699,7 +699,7 @@ def main():
     }
 
     # --- index klines (app.py-compatible structure) ---
-    def _idx_kline(code, days=120):
+    def _idx_kline(code, days=200):
         try:
             rows = _post(
                 "index_daily",
@@ -727,9 +727,9 @@ def main():
         return outk
 
     indices = {
-        "sh": _idx_kline("000001.SH", 120),
-        "cyb": _idx_kline("399006.SZ", 120),
-        "kcb": _idx_kline("000688.SH", 120),
+        "sh": _idx_kline("000001.SH", 200),
+        "cyb": _idx_kline("399006.SZ", 200),
+        "kcb": _idx_kline("000688.SH", 200),
     }
 
     # --- gem pe (near 500 trade days) ---
