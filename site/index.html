@@ -188,9 +188,6 @@
     const root = document.createElement('div');
     root.className = 'grid';
 
-    root.appendChild(card('今日结论', `
-      <p class="headline">${d?.conclusion ?? '（待生成）'}</p>
-    `, 'card hero'));
 
     root.appendChild(card('1) 外盘数据', `<div class="muted">BTC / XAU / 美债10Y（无LLM，纯数据）。</div>`, 'card full'));
     const ex = d?.external || {};
@@ -212,19 +209,6 @@
     root.appendChild(card('科创板指数（近200）', `<div id="chart-idx-kcb" style="height:260px;"></div>`, 'card third'));
     root.appendChild(card('创业板PE（近500）', `<div id="chart-gem-pe" style="height:260px;"></div>`, 'card full'));
 
-    const kpis = [
-      { t: 'Top200 中位市值（元）', v: fmt(d?.kpi?.median_mktcap_cny), d: '市值口径：总市值；分层：<50亿 / 50-200亿 / >200亿' },
-      { t: 'Top200 中位成交额（元）', v: fmt(d?.kpi?.median_turnover_cny), d: '分层：>10亿 / 3-10亿 / <3亿' },
-      { t: '主导板块', v: d?.kpi?.dominant_board ?? '—', d: '主板（沪深合并）/ 创业板 / 科创板' },
-      { t: '主导形态', v: d?.kpi?.dominant_pattern ?? '—', d: '规则识别（V1 迭代阈值）' },
-    ];
-    for (const k of kpis) {
-      const el = document.createElement('section');
-      el.className = 'card kpi';
-      el.innerHTML = `<h2>${k.t}</h2><div class="v">${k.v}</div><div class="d">${k.d}</div>`;
-      root.appendChild(el);
-    }
-
     // 大盘历史趋势图（按 app.py 口径迁移，样式沿用）
     root.appendChild(card('成交额（近30）', `
       <div id="chart-mh-turnover" style="height:260px;"></div>
@@ -243,28 +227,7 @@
       <div id="chart-mh-limit" style="height:260px;"></div>
     `, 'card half'));
 
-    root.appendChild(card('市值分层分布', `
-      <div id="chart-cap" style="height:240px;"></div>
-      <div class="muted">分层：微盘&lt;50亿 / 中盘50-200亿 / 大盘&gt;200亿（Top100 样本）。</div>
-    `, 'card third'));
-
-    root.appendChild(card('成交额分层分布', `
-      <div id="chart-turn" style="height:240px;"></div>
-      <div class="muted">分层：&gt;10亿 / 3-10亿 / &lt;3亿（Top100 样本）。</div>
-    `, 'card third'));
-
-    root.appendChild(card('形态分布', `
-      <div id="chart-pattern" style="height:240px;"></div>
-      <div class="muted">规则版 v1：按 PRD 形态量化方法分类。</div>
-    `, 'card third'));
-
-    // gallery
-    root.appendChild(card('形态样本（250日 K线）', `
-      <div class="muted">仅展示当日被形态方法命中的样本（每类取前12）。K线为前复权。</div>
-      <div id="gallery" style="margin-top:12px;"></div>
-    `, 'card full'));
-
-    // wire charts + gallery
+    // wire charts
     setTimeout(() => {
       const rows = (d?.top200 ?? []).slice();
 
@@ -330,15 +293,6 @@
           });
           return chart;
         };
-
-        const capData = countBy(r => r.cap_bucket, ['微盘','中盘','大盘','—']);
-        const turnData = countBy(r => r.turn_bucket, ['>10亿','3-10亿','<3亿','—']);
-        // pattern: include 未归类（原先被 filter 掉了）
-        const patData = countBy(r => r.pattern);
-
-        const cap = makeBar($('#chart-cap'), capData, '市值分层', ['微盘','中盘','大盘','未归类']);
-        const turn = makeBar($('#chart-turn'), turnData, '成交额分层', ['>10亿','3-10亿','<3亿','未归类']);
-        const pat = makeBar($('#chart-pattern'), patData, '形态分布');
 
         // market history charts (app.py style migration)
         const mh = Array.isArray(d?.market_history) ? d.market_history : [];
@@ -417,251 +371,12 @@
         }
 
         window.addEventListener('resize', () => {
-          cap.resize(); turn.resize(); pat.resize();
           cTurn && cTurn.resize(); cAct && cAct.resize(); cFin && cFin.resize(); cUD && cUD.resize(); cLim && cLim.resize();
           cIdxSh && cIdxSh.resize(); cIdxC && cIdxC.resize(); cIdxK && cIdxK.resize(); cGem && cGem.resize();
         }, { passive: true });
       }
 
-      function renderGallery() {
-        const g = $('#gallery');
-        if (!g) return;
-        const groups = d?.pattern_groups || {};
-        const keys = Object.keys(groups);
-        if (!keys.length) {
-          g.innerHTML = `<div class="empty">暂无形态样本（等待生成器写入 pattern_groups）。</div>`;
-          return;
-        }
-
-        g.innerHTML = keys.map((k, gi) => {
-          const items = groups[k] || [];
-          const tiles = items.map((it, idx) => {
-            // IMPORTANT: Chinese labels are non-word chars; avoid id collisions by using group index.
-            const id = `k_g${gi}_${idx}`;
-            return `
-              <div class="tile">
-                <p class="name">${it.name || ''} <span class="muted">${it.ts_code || ''}</span></p>
-                <p class="meta">${k}</p>
-                <div id="${id}" class="kbox"></div>
-              </div>
-            `;
-          }).join('');
-          return `
-            <div style="margin-top:14px;">
-              <div class="row" style="margin-bottom:8px;">
-                <div style="font-weight:800;">${k}</div>
-                <div class="pill">${items.length} 只</div>
-              </div>
-              <div class="tiles">${tiles}</div>
-            </div>
-          `;
-        }).join('');
-
-        // render kline charts
-        if (!window.echarts) return;
-        keys.forEach((k, gi) => {
-          const items = groups[k] || [];
-          items.forEach((it, idx) => {
-            const id = `k_g${gi}_${idx}`;
-            const el = document.getElementById(id);
-            if (!el) return;
-            const kl = it.kline_120 || [];
-            const dates = kl.map(x => x[0]);
-            const vals = kl.map(x => [x[1], x[4], x[3], x[2]]); // [open, close, low, high]
-            const closes = kl.map(x => x[4]);
-
-            const ma = (n) => closes.map((_, i) => {
-              if (i < n-1) return null;
-              let s = 0;
-              for (let k=i-n+1; k<=i; k++) s += closes[k];
-              return +(s/n).toFixed(4);
-            });
-
-            const ma5 = ma(5), ma20 = ma(20), ma60 = ma(60);
-
-            const chart = echarts.init(el);
-            chart.setOption({
-              backgroundColor: 'transparent',
-              grid: { left: 6, right: 6, top: 8, bottom: 14 },
-              xAxis: { type: 'category', data: dates, show: false },
-              yAxis: { scale: true, show: false },
-              tooltip: { trigger: 'axis', axisPointer: { type: 'cross' } },
-              series: [
-                {
-                  type: 'candlestick',
-                  data: vals,
-                  itemStyle: {
-                    // boss request: 红涨绿跌
-                    color: 'rgba(251,113,133,.90)',
-                    color0: 'rgba(74,222,128,.90)',
-                    borderColor: 'rgba(251,113,133,.90)',
-                    borderColor0: 'rgba(74,222,128,.90)'
-                  }
-                },
-                { type: 'line', data: ma5, showSymbol: false, smooth: true, lineStyle: { width: 1, color: 'rgba(110,231,255,.90)' } },
-                { type: 'line', data: ma20, showSymbol: false, smooth: true, lineStyle: { width: 1, color: 'rgba(99,102,241,.90)' } },
-                { type: 'line', data: ma60, showSymbol: false, smooth: true, lineStyle: { width: 1, color: 'rgba(251,191,36,.90)' } }
-              ]
-            });
-            window.addEventListener('resize', () => chart.resize(), { passive: true });
-          });
-        });
-      }
-
       renderCharts();
-      renderGallery();
-    }, 0);
-
-    return root;
-  }
-
-  function renderTrend() {
-    const root = document.createElement('div');
-    root.className = 'grid';
-
-    root.appendChild(card('风格持续性（近20日）', `
-      <div class="muted">口径：读取每日 JSON 中的 dominant_board / dominant_pattern，并计算“主导形态连续天数”。</div>
-      <div class="toolbar" style="margin-top:10px;">
-        <button class="pill" id="trend-refresh">重新加载</button>
-        <span class="pill" id="trend-status">加载中…</span>
-      </div>
-      <div style="margin-top:12px; overflow:auto;">
-        <table>
-          <thead>
-            <tr>
-              <th>日期</th>
-              <th>主导板块</th>
-              <th>主导形态</th>
-              <th>形态连续（截至当日）</th>
-              <th>Top200中位市值(元)</th>
-              <th>Top200中位成交额(元)</th>
-              <th>结论</th>
-            </tr>
-          </thead>
-          <tbody id="trend-tbody"></tbody>
-        </table>
-      </div>
-      <div id="trend-empty" class="empty" style="display:none;">暂无可用历史数据（请先生成 data/YYYY-MM-DD.json）。</div>
-    `, 'card full'));
-
-    root.appendChild(card('主导形态分布（近20日）', `
-      <div id="chart-trend-pattern" style="height:260px;"></div>
-      <div class="muted">统计口径：每日 dominant_pattern（忽略“—”）。</div>
-    `, 'card half'));
-
-    root.appendChild(card('主导板块分布（近20日）', `
-      <div id="chart-trend-board" style="height:260px;"></div>
-      <div class="muted">统计口径：每日 dominant_board。</div>
-    `, 'card half'));
-
-    // async hydrate
-    setTimeout(async () => {
-      const btn = $('#trend-refresh');
-      if (btn) btn.onclick = () => render();
-
-      const statusEl = $('#trend-status');
-      const tbody = $('#trend-tbody');
-      const emptyEl = $('#trend-empty');
-
-      const dates = (state.history?.dates ?? []).slice(0, 20);
-      const days = [];
-
-      // fetch each day; skip missing files to tolerate stale index.json
-      for (const d of dates) {
-        try {
-          const j = await fetchJson(`./data/${d}.json`);
-          days.push(j);
-        } catch (e) {
-          // ignore
-        }
-      }
-
-      if (!days.length) {
-        if (statusEl) statusEl.textContent = '无数据';
-        if (emptyEl) emptyEl.style.display = 'block';
-        return;
-      }
-
-      // sort desc by date
-      days.sort((a,b) => String(b.date).localeCompare(String(a.date)));
-
-      // compute streak (consecutive same dominant_pattern, from each day backwards)
-      const streakByDate = new Map();
-      for (let i = 0; i < days.length; i++) {
-        const p = days[i]?.kpi?.dominant_pattern ?? '—';
-        let s = 1;
-        for (let k = i + 1; k < days.length; k++) {
-          const pk = days[k]?.kpi?.dominant_pattern ?? '—';
-          if (pk === p && p !== '—') s++;
-          else break;
-        }
-        streakByDate.set(days[i].date, (p === '—') ? 0 : s);
-      }
-
-      // render table
-      if (tbody) {
-        tbody.innerHTML = days.map(d => {
-          const date = d?.date ?? '—';
-          const board = d?.kpi?.dominant_board ?? '—';
-          const pat = d?.kpi?.dominant_pattern ?? '—';
-          const streak = streakByDate.get(date) ?? 0;
-          const mv = fmt(d?.kpi?.median_mktcap_cny);
-          const turn = fmt(d?.kpi?.median_turnover_cny);
-          const concl = d?.conclusion ?? '';
-          return `
-            <tr>
-              <td><a href="?date=${encodeURIComponent(date)}">${date}</a></td>
-              <td>${board}</td>
-              <td>${pat}</td>
-              <td>${streak ? `${streak} 天` : '—'}</td>
-              <td>${mv}</td>
-              <td>${turn}</td>
-              <td class="muted">${concl}</td>
-            </tr>
-          `.trim();
-        }).join('');
-      }
-
-      if (statusEl) statusEl.textContent = `已加载 ${days.length} 天`;
-
-      // charts
-      if (window.echarts) {
-        const count = (arr, keyFn) => {
-          const m = new Map();
-          for (const x of arr) {
-            const k = keyFn(x);
-            if (!k) continue;
-            m.set(k, (m.get(k) || 0) + 1);
-          }
-          return Array.from(m.entries()).map(([k,v]) => ({ k, v })).sort((a,b) => b.v - a.v);
-        };
-
-        const patCnt = count(days, d => {
-          const p = d?.kpi?.dominant_pattern;
-          if (!p || p === '—') return null;
-          return p;
-        });
-        const boardCnt = count(days, d => d?.kpi?.dominant_board || '—');
-
-        const makeBar = (el, data) => {
-          const chart = echarts.init(el);
-          chart.setOption({
-            backgroundColor: 'transparent',
-            grid: { left: 40, right: 16, top: 12, bottom: 40 },
-            tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
-            xAxis: { type: 'category', data: data.map(x => x.k), axisLabel: { color: 'rgba(231,234,242,.72)', rotate: 20 } },
-            yAxis: { type: 'value', axisLabel: { color: 'rgba(231,234,242,.72)' }, splitLine: { lineStyle: { color: 'rgba(255,255,255,.08)' } } },
-            series: [{ type: 'bar', data: data.map(x => x.v), itemStyle: { color: 'rgba(110,231,255,.65)' } }]
-          });
-          window.addEventListener('resize', () => chart.resize(), { passive: true });
-        };
-
-        const pEl = $('#chart-trend-pattern');
-        const bEl = $('#chart-trend-board');
-        if (pEl) makeBar(pEl, patCnt.length ? patCnt : [{k:'—', v:0}]);
-        if (bEl) makeBar(bEl, boardCnt.length ? boardCnt : [{k:'—', v:0}]);
-      }
-
     }, 0);
 
     return root;
@@ -877,19 +592,6 @@
       mkBar($('#chart-dt-tier'), dtPairs, '#22c55e');
     }, 0);
 
-    return root;
-  }
-
-  function renderArchive() {
-    const root = document.createElement('div');
-    root.className = 'grid';
-    const items = state.history?.dates ?? [];
-    root.appendChild(card('历史归档', `
-      <div class="muted">点击日期查看当日页面（静态 JSON 驱动）。</div>
-      <div style="margin-top:10px; display:flex; flex-wrap:wrap; gap:10px;">
-        ${items.length ? items.map(d => `<a class="pill" href="?date=${encodeURIComponent(d)}">${d}</a>`).join('') : '<div class="empty">暂无归档（等生成器）。</div>'}
-      </div>
-    `, 'card full'));
     return root;
   }
 
