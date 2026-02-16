@@ -80,20 +80,26 @@ def _cap_bucket_yi(mktcap_yi):
     if mktcap_yi is None:
         return None
     if mktcap_yi < 50:
-        return "微盘"
-    if mktcap_yi <= 200:
-        return "中盘"
-    return "大盘"
+        return "<50亿"
+    if mktcap_yi < 100:
+        return "50-100亿"
+    if mktcap_yi < 200:
+        return "100-200亿"
+    if mktcap_yi < 500:
+        return "200-500亿"
+    return ">500亿"
 
 
 def _turn_bucket_yi(turnover_yi):
     if turnover_yi is None:
         return None
-    if turnover_yi > 10:
-        return ">10亿"
-    if turnover_yi >= 3:
-        return "3-10亿"
-    return "<3亿"
+    if turnover_yi < 5:
+        return "<5亿"
+    if turnover_yi < 50:
+        return "5-50亿"
+    if turnover_yi < 90:
+        return "50-90亿"
+    return ">90亿"
 
 
 def _median(nums):
@@ -207,7 +213,7 @@ def main():
     ap.add_argument("--date", help="target date YYYYMMDD (defaults: today)")
     ap.add_argument("--sleep", type=float, default=0.12, help="sleep between api calls")
     ap.add_argument("--mysql", action="store_true", help="also upsert snapshot into local MySQL (daily_snapshot)")
-    ap.add_argument("--pattern-top-n", type=int, default=35, help="max symbols for heavy pattern historical computation")
+    ap.add_argument("--pattern-top-n", type=int, default=100, help="max symbols for heavy pattern historical computation")
     args = ap.parse_args()
 
     token = os.environ.get("TUSHARE_TOKEN")
@@ -670,6 +676,7 @@ def main():
     av_key = os.environ.get("ALPHAVANTAGE_API_KEY")
     btc_ts = _fetch_alpha_vantage_daily("close", av_key, function="DIGITAL_CURRENCY_DAILY", symbol="BTC", market="USD")
     xau_ts = _fetch_alpha_vantage_daily("close", av_key, function="FX_DAILY", from_symbol="XAU", to_symbol="USD")
+    usdcny_ts = _fetch_alpha_vantage_daily("close", av_key, function="FX_DAILY", from_symbol="USD", to_symbol="CNY")
     us10y_ts = _fetch_alpha_vantage_daily("value", av_key, function="TREASURY_YIELD", maturity="10year", interval="daily")
 
     def _pack_metric(ts, change_kind="pct", keep=120):
@@ -695,6 +702,7 @@ def main():
     external = {
         "btc": _pack_metric(btc_ts, "pct", 120),
         "xau": _pack_metric(xau_ts, "pct", 120),
+        "usdcny": _pack_metric(usdcny_ts, "pct", 120),
         "us10y": _pack_metric(us10y_ts, "bp", 120),
     }
 

@@ -94,7 +94,7 @@ def main():
             raise
 
         # 2) generate + persist MySQL (split + retry to avoid long single run)
-        attempts = [35, 25, 18]
+        attempts = [100, 80, 60]
         last_err = None
         used_n = None
         for n in attempts:

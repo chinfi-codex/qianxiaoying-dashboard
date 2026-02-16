@@ -216,6 +216,7 @@
     const exRows = [
       { t: 'BTC', v: ex?.btc?.value == null ? '—' : `$${fmt(Math.round(ex.btc.value))}`, d: ex?.btc?.change == null ? '—' : `${Number(ex.btc.change).toFixed(2)}%`, sid: 'btc' },
       { t: 'XAU', v: ex?.xau?.value == null ? '—' : `${Number(ex.xau.value).toFixed(2)}`, d: ex?.xau?.change == null ? '—' : `${Number(ex.xau.change).toFixed(2)}%`, sid: 'xau' },
+      { t: 'USD/CNY', v: ex?.usdcny?.value == null ? '—' : `${Number(ex.usdcny.value).toFixed(4)}`, d: ex?.usdcny?.change == null ? '—' : `${Number(ex.usdcny.change).toFixed(2)}%`, sid: 'usdcny' },
       { t: 'US10Y', v: ex?.us10y?.value == null ? '—' : `${Number(ex.us10y.value).toFixed(2)}%`, d: ex?.us10y?.change == null ? '—' : `${Number(ex.us10y.change).toFixed(1)}bp`, sid: 'us10y' },
     ];
     root.appendChild(card('1) 外盘数据', `
@@ -234,20 +235,20 @@
     root.appendChild(card('创业板PE（近500）', `<div id="chart-gem-pe" style="height:260px;"></div>`, 'card full'));
 
     // 大盘历史趋势图（按 app.py 口径迁移，样式沿用）
-    root.appendChild(card('成交额（近30）', `
+    root.appendChild(card('成交额（近60）', `
       <div id="chart-mh-turnover" style="height:260px;"></div>
     `, 'card third'));
-    root.appendChild(card('情绪指数/活跃度（近30）', `
+    root.appendChild(card('情绪指数/活跃度（近60）', `
       <div id="chart-mh-activity" style="height:260px;"></div>
     `, 'card third'));
-    root.appendChild(card('融资净买入（近30）', `
+    root.appendChild(card('融资净买入（近60）', `
       <div id="chart-mh-fin" style="height:260px;"></div>
     `, 'card third'));
 
-    root.appendChild(card('涨跌家数对比（近30）', `
+    root.appendChild(card('涨跌家数对比（近60）', `
       <div id="chart-mh-updown" style="height:260px;"></div>
     `, 'card half'));
-    root.appendChild(card('涨停/跌停数量（近30）', `
+    root.appendChild(card('涨停/跌停数量（近60）', `
       <div id="chart-mh-limit" style="height:260px;"></div>
     `, 'card half'));
 
@@ -289,6 +290,7 @@
         };
         const cExBtc = mkMini($('#chart-ex-btc'), ex?.btc?.series || []);
         const cExXau = mkMini($('#chart-ex-xau'), ex?.xau?.series || []);
+        const cExUsdcny = mkMini($('#chart-ex-usdcny'), ex?.usdcny?.series || []);
         const cExUs10 = mkMini($('#chart-ex-us10y'), ex?.us10y?.series || []);
 
         const normalizeLabel = (k) => {
@@ -376,6 +378,13 @@
         const cUD   = mkLine2($('#chart-mh-updown'), mh.map(x => x['上涨']), mh.map(x => x['下跌']), '上涨家数', '下跌家数', '#22c55e', '#ef4444');
         const cLim  = mkLine2($('#chart-mh-limit'), mh.map(x => x['涨停']), mh.map(x => x['跌停']), '涨停数', '跌停数', '#ef4444', '#3b82f6');
 
+        const ma = (arr, n) => arr.map((_, i) => {
+          if (i < n - 1) return null;
+          let sum = 0;
+          for (let j = i - n + 1; j <= i; j++) sum += Number(arr[j]);
+          return +(sum / n).toFixed(4);
+        });
+
         const mkK = (el, arr) => {
           if (!el) return null;
           if (!Array.isArray(arr) || !arr.length) return null;
@@ -388,7 +397,12 @@
             xAxis: { type: 'category', data: dates, axisLabel: { show: false } },
             yAxis: { scale: true, axisLabel: { color: '#5c6b8a' }, splitLine: { lineStyle: { color: '#e5edff' } } },
             tooltip: { trigger: 'axis' },
-            series: [{ type: 'candlestick', data: vals, itemStyle: { color: '#ef4444', color0: '#22c55e', borderColor: '#ef4444', borderColor0: '#22c55e' } }]
+            series: [
+              { type: 'candlestick', name: 'K', data: vals, itemStyle: { color: '#ef4444', color0: '#22c55e', borderColor: '#ef4444', borderColor0: '#22c55e' } },
+              { type: 'line', name: 'MA5', data: ma(vals.map(v => v[1]), 5), showSymbol: false, lineStyle: { width: 1.2, color: '#f59e0b' } },
+              { type: 'line', name: 'MA10', data: ma(vals.map(v => v[1]), 10), showSymbol: false, lineStyle: { width: 1.2, color: '#3b82f6' } },
+              { type: 'line', name: 'MA20', data: ma(vals.map(v => v[1]), 20), showSymbol: false, lineStyle: { width: 1.2, color: '#10b981' } }
+            ]
           });
           return chart;
         };
@@ -415,7 +429,7 @@
         window.addEventListener('resize', () => {
           cTurn && cTurn.resize(); cAct && cAct.resize(); cFin && cFin.resize(); cUD && cUD.resize(); cLim && cLim.resize();
           cIdxSh && cIdxSh.resize(); cIdxC && cIdxC.resize(); cIdxK && cIdxK.resize(); cGem && cGem.resize();
-          cExBtc && cExBtc.resize(); cExXau && cExXau.resize(); cExUs10 && cExUs10.resize();
+          cExBtc && cExBtc.resize(); cExXau && cExXau.resize(); cExUsdcny && cExUsdcny.resize(); cExUs10 && cExUs10.resize();
         }, { passive: true });
       }
 
@@ -538,8 +552,8 @@
         if (order) out.sort((a,b)=>order.indexOf(a.k)-order.indexOf(b.k));
         return out;
       };
-      const cap = countBy(gRows, r => r.cap_bucket, ['微盘','中盘','大盘','未归类']);
-      const turn = countBy(gRows, r => r.turn_bucket, ['>10亿','3-10亿','<3亿','未归类']);
+      const cap = countBy(gRows, r => r.cap_bucket, ['<50亿','50-100亿','100-200亿','200-500亿','>500亿','未归类']);
+      const turn = countBy(gRows, r => r.turn_bucket, ['<5亿','5-50亿','50-90亿','>90亿','未归类']);
       const board = countBy(gRows, r => r.board, ['主板','创业板','科创板','未归类']);
       const pattern = countBy(gRows, r => (r.pattern && r.pattern !== '—') ? r.pattern : '未归类');
 
@@ -650,9 +664,18 @@
     const url = new URL(location.href);
     const date = url.searchParams.get('date');
 
-    // date picker defaults
+    // date picker defaults (Asia/Shanghai today; URL date takes precedence)
     const dp = $('#datepick');
-    if (dp && date) dp.value = date;
+    const shanghaiToday = (() => {
+      const now = new Date();
+      const utc = now.getTime() + now.getTimezoneOffset() * 60000;
+      const cst = new Date(utc + 8 * 3600000);
+      const y = cst.getUTCFullYear();
+      const m = String(cst.getUTCMonth() + 1).padStart(2, '0');
+      const d = String(cst.getUTCDate()).padStart(2, '0');
+      return `${y}-${m}-${d}`;
+    })();
+    if (dp) dp.value = date || shanghaiToday;
 
     // Load button behavior per PRD:
     // 1) check trading day by trade_calendar.json

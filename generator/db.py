@@ -130,7 +130,7 @@ def upsert_market_history_rows(rows):
         cn.close()
 
 
-def get_market_history(end_date_ymd=None, limit=30):
+def get_market_history(end_date_ymd=None, limit=60):
     cn = get_conn()
     try:
         cur = cn.cursor(dictionary=True)
