@@ -205,6 +205,24 @@
       root.appendChild(el);
     }
 
+    // 大盘历史趋势图（按 app.py 口径迁移，样式沿用）
+    root.appendChild(card('成交额（近30）', `
+      <div id="chart-mh-turnover" style="height:260px;"></div>
+    `, 'card third'));
+    root.appendChild(card('情绪指数/活跃度（近30）', `
+      <div id="chart-mh-activity" style="height:260px;"></div>
+    `, 'card third'));
+    root.appendChild(card('融资净买入（近30）', `
+      <div id="chart-mh-fin" style="height:260px;"></div>
+    `, 'card third'));
+
+    root.appendChild(card('涨跌家数对比（近30）', `
+      <div id="chart-mh-updown" style="height:260px;"></div>
+    `, 'card half'));
+    root.appendChild(card('涨停/跌停数量（近30）', `
+      <div id="chart-mh-limit" style="height:260px;"></div>
+    `, 'card half'));
+
     root.appendChild(card('市值分层分布', `
       <div id="chart-cap" style="height:240px;"></div>
       <div class="muted">分层：微盘&lt;50亿 / 中盘50-200亿 / 大盘&gt;200亿（Top100 样本）。</div>
@@ -302,7 +320,50 @@
         const turn = makeBar($('#chart-turn'), turnData, '成交额分层', ['>10亿','3-10亿','<3亿','未归类']);
         const pat = makeBar($('#chart-pattern'), patData, '形态分布');
 
-        window.addEventListener('resize', () => { cap.resize(); turn.resize(); pat.resize(); }, { passive: true });
+        // market history charts (app.py style migration)
+        const mh = Array.isArray(d?.market_history) ? d.market_history : [];
+        const dates = mh.map(x => x.date);
+        const mkLine = (el, y, title, color) => {
+          if (!el) return null;
+          const chart = echarts.init(el);
+          chart.setOption({
+            backgroundColor: 'transparent',
+            grid: { left: 40, right: 16, top: 20, bottom: 32 },
+            tooltip: { trigger: 'axis', axisPointer: { type: 'line' } },
+            xAxis: { type: 'category', data: dates, axisLabel: { color: 'rgba(231,234,242,.72)', rotate: 20 } },
+            yAxis: { type: 'value', axisLabel: { color: 'rgba(231,234,242,.72)' }, splitLine: { lineStyle: { color: 'rgba(255,255,255,.08)' } } },
+            series: [{ type: 'line', data: y, smooth: false, symbol: 'circle', symbolSize: 4, lineStyle: { width: 2, color }, itemStyle: { color } }]
+          });
+          return chart;
+        };
+        const mkBar2 = (el, s1, s2, n1, n2, c1, c2) => {
+          if (!el) return null;
+          const chart = echarts.init(el);
+          chart.setOption({
+            backgroundColor: 'transparent',
+            grid: { left: 40, right: 16, top: 20, bottom: 32 },
+            tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
+            legend: { textStyle: { color: 'rgba(231,234,242,.72)' } },
+            xAxis: { type: 'category', data: dates, axisLabel: { color: 'rgba(231,234,242,.72)', rotate: 20 } },
+            yAxis: { type: 'value', axisLabel: { color: 'rgba(231,234,242,.72)' }, splitLine: { lineStyle: { color: 'rgba(255,255,255,.08)' } } },
+            series: [
+              { name: n1, type: 'bar', data: s1, itemStyle: { color: c1 }, opacity: 0.8 },
+              { name: n2, type: 'bar', data: s2, itemStyle: { color: c2 }, opacity: 0.8 },
+            ]
+          });
+          return chart;
+        };
+
+        const cTurn = mkLine($('#chart-mh-turnover'), mh.map(x => x['成交额']), '成交额', '#4c6ef5');
+        const cAct  = mkLine($('#chart-mh-activity'), mh.map(x => x['活跃度']), '情绪指数', '#f39c12');
+        const cFin  = mkLine($('#chart-mh-fin'), mh.map(x => x['融资净买入']), '融资净买入', '#16a085');
+        const cUD   = mkBar2($('#chart-mh-updown'), mh.map(x => x['上涨']), mh.map(x => x['下跌']), '上涨家数', '下跌家数', '#2ecc71', '#e74c3c');
+        const cLim  = mkBar2($('#chart-mh-limit'), mh.map(x => x['涨停']), mh.map(x => x['跌停']), '涨停数', '跌停数', '#e74c3c', '#3498db');
+
+        window.addEventListener('resize', () => {
+          cap.resize(); turn.resize(); pat.resize();
+          cTurn && cTurn.resize(); cAct && cAct.resize(); cFin && cFin.resize(); cUD && cUD.resize(); cLim && cLim.resize();
+        }, { passive: true });
       }
 
       function renderGallery() {

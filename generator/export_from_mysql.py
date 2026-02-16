@@ -15,7 +15,7 @@ import argparse
 import json
 import os
 
-from db import load_daily_snapshot, list_snapshot_dates
+from db import load_daily_snapshot, list_snapshot_dates, get_market_history
 
 
 def _ensure_dir(p):
@@ -38,6 +38,7 @@ def main():
         payload = load_daily_snapshot(args.date)
         if not payload:
             raise SystemExit(f"No snapshot in DB for {args.date}")
+        payload["market_history"] = get_market_history(end_date_ymd=args.date, limit=30)
         with open(os.path.join(data_dir, f"{args.date}.json"), "w", encoding="utf-8") as f:
             json.dump(payload, f, ensure_ascii=False, indent=2)
 
@@ -46,6 +47,7 @@ def main():
         if not dates:
             raise SystemExit("No snapshots in DB")
         payload = load_daily_snapshot(dates[0])
+        payload["market_history"] = get_market_history(end_date_ymd=dates[0], limit=30)
         with open(os.path.join(data_dir, "latest.json"), "w", encoding="utf-8") as f:
             json.dump(payload, f, ensure_ascii=False, indent=2)
 
