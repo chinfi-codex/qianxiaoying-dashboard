@@ -189,19 +189,20 @@
     root.className = 'grid';
 
 
-    root.appendChild(card('1) 外盘数据', `<div class="muted">BTC / XAU / 美债10Y（无LLM，纯数据）。</div>`, 'card full'));
     const ex = d?.external || {};
-    const exKpis = [
-      { t: 'BTC', v: ex?.btc?.value == null ? '—' : `$${fmt(Math.round(ex.btc.value))}`, d: ex?.btc?.change == null ? '—' : `${Number(ex.btc.change).toFixed(2)}%` },
-      { t: 'XAU', v: ex?.xau?.value == null ? '—' : `${Number(ex.xau.value).toFixed(2)}`, d: ex?.xau?.change == null ? '—' : `${Number(ex.xau.change).toFixed(2)}%` },
-      { t: 'US10Y', v: ex?.us10y?.value == null ? '—' : `${Number(ex.us10y.value).toFixed(2)}%`, d: ex?.us10y?.change == null ? '—' : `${Number(ex.us10y.change).toFixed(1)}bp` },
+    const exRows = [
+      { t: 'BTC', v: ex?.btc?.value == null ? '—' : `$${fmt(Math.round(ex.btc.value))}`, d: ex?.btc?.change == null ? '—' : `${Number(ex.btc.change).toFixed(2)}%`, sid: 'btc' },
+      { t: 'XAU', v: ex?.xau?.value == null ? '—' : `${Number(ex.xau.value).toFixed(2)}`, d: ex?.xau?.change == null ? '—' : `${Number(ex.xau.change).toFixed(2)}%`, sid: 'xau' },
+      { t: 'US10Y', v: ex?.us10y?.value == null ? '—' : `${Number(ex.us10y.value).toFixed(2)}%`, d: ex?.us10y?.change == null ? '—' : `${Number(ex.us10y.change).toFixed(1)}bp`, sid: 'us10y' },
     ];
-    for (const k of exKpis) {
-      const el = document.createElement('section');
-      el.className = 'card kpi';
-      el.innerHTML = `<h2>${k.t}</h2><div class="v">${k.v}</div><div class="d">日变动: ${k.d}</div>`;
-      root.appendChild(el);
-    }
+    root.appendChild(card('1) 外盘数据', `
+      <table>
+        <thead><tr><th>标的</th><th>数据</th><th>日变动</th><th>120日折线</th></tr></thead>
+        <tbody>
+          ${exRows.map(r => `<tr><td>${r.t}</td><td>${r.v}</td><td>${r.d}</td><td><div id="chart-ex-${r.sid}" style="height:56px;min-width:180px;"></div></td></tr>`).join('')}
+        </tbody>
+      </table>
+    `, 'card full'));
 
     root.appendChild(card('2) 大盘数据', `<div class="muted">三大指数K线 + 历史趋势（按 app.py 口径迁移）。</div>`, 'card full'));
     root.appendChild(card('上证指数（近200）', `<div id="chart-idx-sh" style="height:260px;"></div>`, 'card third'));
@@ -248,6 +249,24 @@
 
       function renderCharts() {
         if (!window.echarts) return;
+
+        const mkMini = (el, series) => {
+          if (!el) return null;
+          const arr = Array.isArray(series) ? series : [];
+          const chart = echarts.init(el);
+          chart.setOption({
+            animation: false,
+            grid: { left: 2, right: 2, top: 4, bottom: 2 },
+            xAxis: { type: 'category', data: arr.map(x => x.date), show: false },
+            yAxis: { type: 'value', show: false, scale: true },
+            tooltip: { trigger: 'axis' },
+            series: [{ type: 'line', data: arr.map(x => x.value), showSymbol: false, lineStyle: { width: 1.6, color: '#3b82f6' }, areaStyle: { color: 'rgba(59,130,246,.08)' } }]
+          });
+          return chart;
+        };
+        const cExBtc = mkMini($('#chart-ex-btc'), ex?.btc?.series || []);
+        const cExXau = mkMini($('#chart-ex-xau'), ex?.xau?.series || []);
+        const cExUs10 = mkMini($('#chart-ex-us10y'), ex?.us10y?.series || []);
 
         const normalizeLabel = (k) => {
           if (k == null) return '未归类';
@@ -373,6 +392,7 @@
         window.addEventListener('resize', () => {
           cTurn && cTurn.resize(); cAct && cAct.resize(); cFin && cFin.resize(); cUD && cUD.resize(); cLim && cLim.resize();
           cIdxSh && cIdxSh.resize(); cIdxC && cIdxC.resize(); cIdxK && cIdxK.resize(); cGem && cGem.resize();
+          cExBtc && cExBtc.resize(); cExXau && cExXau.resize(); cExUs10 && cExUs10.resize();
         }, { passive: true });
       }
 
