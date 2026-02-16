@@ -102,9 +102,20 @@ def main():
         with open(os.path.join(data_dir, "index.json"), "w", encoding="utf-8") as f:
             json.dump(idx, f, ensure_ascii=False, indent=2)
 
+        db_dates = list_snapshot_dates(limit=args.limit)
+        with open(os.path.join(data_dir, "db_dates.json"), "w", encoding="utf-8") as f:
+            json.dump({"dates": db_dates}, f, ensure_ascii=False, indent=2)
+
         cal = _build_trade_calendar(days_back=365, days_forward=45)
         with open(os.path.join(data_dir, "trade_calendar.json"), "w", encoding="utf-8") as f:
             json.dump(cal, f, ensure_ascii=False, indent=2)
+
+        with open(os.path.join(data_dir, "data_status.json"), "w", encoding="utf-8") as f:
+            json.dump({
+                "generated_at": dt.datetime.now().isoformat(),
+                "mysql_snapshot_dates": db_dates,
+                "trade_calendar_open_days": cal.get("open_days", []),
+            }, f, ensure_ascii=False, indent=2)
 
     print("OK")
 

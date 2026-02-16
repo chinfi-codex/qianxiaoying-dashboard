@@ -7,16 +7,16 @@
   <meta name="description" content="A股赚钱效应：每日风格识别与持续性追踪" />
   <style>
     :root {
-      --bg: #f4f7ff;
+      --bg: #f3f6fb;
       --panel: #ffffff;
-      --panel2: #f8fbff;
-      --text: #1f2a44;
-      --muted: #5c6b8a;
-      --line: #dbe4ff;
-      --brand: #3b82f6;
-      --good: #22c55e;
-      --warn: #f59e0b;
-      --bad: #ef4444;
+      --panel2: #f6f9ff;
+      --text: #1c2b4a;
+      --muted: #5a6f96;
+      --line: #d8e3f5;
+      --brand: #2962ff;
+      --good: #00a65a;
+      --warn: #f5a623;
+      --bad: #e53935;
     }
     * { box-sizing: border-box; }
     body {
@@ -103,14 +103,21 @@
     }
     @media (max-width: 520px) {
       .tiles { grid-template-columns: 1fr; }
+      .wrap { padding: 12px; }
+      .grid { padding: 12px; gap: 10px; }
+      .card { padding: 10px; }
+      th, td { font-size: 11px; padding: 8px 6px; }
+      .topbar { gap: 8px; align-items: flex-start; flex-wrap: wrap; }
     }
 
     .row { display:flex; align-items: center; justify-content: space-between; gap: 10px; }
     .pill { font-size: 12px; color: var(--muted); border: 1px solid var(--line); padding: 4px 10px; border-radius: 999px; }
 
     table { width: 100%; border-collapse: collapse; }
-    th, td { border-bottom: 1px solid rgba(255,255,255,.08); padding: 10px 8px; font-size: 12px; text-align: left; }
+    th, td { border-bottom: 1px solid var(--line); padding: 10px 8px; font-size: 12px; text-align: left; }
     th { color: var(--muted); font-weight: 600; }
+    .table-wrap { width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+    button, .pill, input[type="date"] { min-height: 40px; }
     .muted { color: var(--muted); }
 
     .toolbar { display:flex; gap:10px; flex-wrap: wrap; align-items: center; }
@@ -146,6 +153,7 @@
         <input id="datepick" type="date" />
         <button id="btn-load" class="pill" style="cursor:pointer;">Load</button>
       </div>
+            <div class="muted" style="font-size:12px;">Load校验来源：MySQL导出的 db_dates.json + trade_calendar.json</div>
     </div>
   </div>
 </header>
@@ -160,6 +168,8 @@
     latest: null,
     history: null,
     tradeCal: null,
+    dbDates: null,
+    dataStatus: null,
   };
 
   async function fetchJson(url) {
@@ -196,12 +206,12 @@
       { t: 'US10Y', v: ex?.us10y?.value == null ? '—' : `${Number(ex.us10y.value).toFixed(2)}%`, d: ex?.us10y?.change == null ? '—' : `${Number(ex.us10y.change).toFixed(1)}bp`, sid: 'us10y' },
     ];
     root.appendChild(card('1) 外盘数据', `
-      <table>
+      <div class="table-wrap"><table>
         <thead><tr><th>标的</th><th>数据</th><th>日变动</th><th>120日折线</th></tr></thead>
         <tbody>
           ${exRows.map(r => `<tr><td>${r.t}</td><td>${r.v}</td><td>${r.d}</td><td><div id="chart-ex-${r.sid}" style="height:56px;min-width:180px;"></div></td></tr>`).join('')}
         </tbody>
-      </table>
+      </table></div>
     `, 'card full'));
 
     root.appendChild(card('2) 大盘数据', `<div class="muted">三大指数K线 + 历史趋势（按 app.py 口径迁移）。</div>`, 'card full'));
@@ -646,7 +656,7 @@
           return;
         }
 
-        const dates = new Set((state.history?.dates || []));
+        const dates = new Set((state.dbDates?.dates || []));
         if (!dates.has(d)) {
           alert(`当天数据未生成，请等待`);
           return;
@@ -686,6 +696,18 @@
       state.tradeCal = await fetchJson('./data/trade_calendar.json');
     } catch (e) {
       state.tradeCal = { open_days: [] };
+    }
+
+    try {
+      state.dbDates = await fetchJson('./data/db_dates.json');
+    } catch (e) {
+      state.dbDates = { dates: [] };
+    }
+
+    try {
+      state.dataStatus = await fetchJson('./data/data_status.json');
+    } catch (e) {
+      state.dataStatus = null;
     }
 
     try {

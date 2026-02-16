@@ -1,6 +1,9 @@
 {
-  "generated_at": "2026-02-16T16:28:47.244061",
-  "open_days": [
+  "generated_at": "2026-02-16T16:28:47.247259",
+  "mysql_snapshot_dates": [
+    "2026-02-13"
+  ],
+  "trade_calendar_open_days": [
     "2025-02-17",
     "2025-02-18",
     "2025-02-19",

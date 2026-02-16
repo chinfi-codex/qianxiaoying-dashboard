@@ -174,3 +174,22 @@ def get_market_history(end_date_ymd=None, limit=30):
         return out
     finally:
         cn.close()
+
+
+def log_job_run(job_name: str, trade_date_ymd: str | None, status: str, error_text: str | None = None, meta: dict | None = None):
+    """Append a job_runs row for observability."""
+    cn = get_conn()
+    try:
+        cur = cn.cursor()
+        td = dt.date.fromisoformat(trade_date_ymd) if trade_date_ymd else None
+        cur.execute(
+            """
+            INSERT INTO job_runs(job_name, trade_date, status, finished_at, error_text, meta_json)
+            VALUES (%s, %s, %s, CURRENT_TIMESTAMP, %s, %s)
+            """,
+            (job_name, td, status, error_text, json.dumps(meta, ensure_ascii=False) if meta is not None else None),
+        )
+        cn.commit()
+        cur.close()
+    finally:
+        cn.close()

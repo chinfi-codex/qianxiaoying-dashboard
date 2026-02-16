@@ -23,6 +23,8 @@ import fcntl
 
 import requests
 
+from db import log_job_run
+
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 GEN = ROOT / "generator"
 ENV = pathlib.Path("/home/admin/.openclaw/workspace/.env")
@@ -84,11 +86,17 @@ def main():
             return 0
 
         # 1) refresh market history baseline from ch-stock csv -> mysql
-        run(["python3.11", str(GEN / "import_market_history_csv.py")], timeout=180, cwd=str(ROOT))
+        try:
+            run(["python3.11", str(GEN / "import_market_history_csv.py")], timeout=180, cwd=str(ROOT))
+            log_job_run("import_market_history", f"{today[:4]}-{today[4:6]}-{today[6:]}", "success", meta={"timeout":180})
+        except Exception as e:
+            log_job_run("import_market_history", f"{today[:4]}-{today[4:6]}-{today[6:]}", "failed", error_text=str(e), meta={"timeout":180})
+            raise
 
         # 2) generate + persist MySQL (split + retry to avoid long single run)
         attempts = [35, 25, 18]
         last_err = None
+        used_n = None
         for n in attempts:
             try:
                 run([
@@ -99,14 +107,22 @@ def main():
                     "--mysql",
                 ], timeout=900, cwd=str(ROOT))
                 last_err = None
+                used_n = n
                 break
             except Exception as e:
                 last_err = e
         if last_err is not None:
+            log_job_run("generate_daily", f"{today[:4]}-{today[4:6]}-{today[6:]}", "failed", error_text=str(last_err), meta={"attempts":attempts})
             raise last_err
+        log_job_run("generate_daily", f"{today[:4]}-{today[4:6]}-{today[6:]}", "success", meta={"attempts":attempts, "used_pattern_top_n":used_n})
 
         # 3) export latest/index
-        run(["python3.11", str(GEN / "export_from_mysql.py"), "--latest", "--rebuild-index", "--limit", "500"], timeout=300, cwd=str(ROOT))
+        try:
+            run(["python3.11", str(GEN / "export_from_mysql.py"), "--latest", "--rebuild-index", "--limit", "500"], timeout=300, cwd=str(ROOT))
+            log_job_run("export_pages", f"{today[:4]}-{today[4:6]}-{today[6:]}", "success", meta={"timeout":300})
+        except Exception as e:
+            log_job_run("export_pages", f"{today[:4]}-{today[4:6]}-{today[6:]}", "failed", error_text=str(e), meta={"timeout":300})
+            raise
 
         # 3) git push if changed
         st = run(["git", "status", "--porcelain"], timeout=30, cwd=str(ROOT))
