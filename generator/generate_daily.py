@@ -112,6 +112,38 @@ def _ensure_dir(p):
         os.makedirs(p)
 
 
+def _build_pct_distribution_from_rows(rows):
+    # align with old ch-stock display buckets
+    buckets = [
+        (20, 10**9, ">20%"),
+        (10, 20, "10%~20%"),
+        (5, 10, "5%~10%"),
+        (3, 5, "3%~5%"),
+        (0, 3, "0%~3%"),
+        (-3, 0, "-3%~0%"),
+        (-5, -3, "-5%~-3%"),
+        (-10, -5, "-10%~-5%"),
+        (-10**9, -10, "<-10%"),
+    ]
+    vals = []
+    for r in rows or []:
+        v = r.get("pct_chg")
+        if v is None:
+            continue
+        vals.append(float(v))
+
+    out = []
+    for lo, hi, label in buckets:
+        if hi >= 10**8:
+            cnt = sum(1 for x in vals if x >= lo)
+        elif lo <= -10**8:
+            cnt = sum(1 for x in vals if x < hi)
+        else:
+            cnt = sum(1 for x in vals if (x >= lo and x < hi))
+        out.append({"label": label, "bucket_start": lo, "bucket_end": hi, "count": cnt})
+    return out
+
+
 def _load_json(path, default):
     if not os.path.exists(path):
         return default
@@ -233,10 +265,22 @@ def main():
     for r in rows:
         r["name"] = name_map.get(r["ts_code"], "")
 
-    # sort by pct desc; take top100
+    # sort by pct desc; keep all for market breadth and top lists
     rows = [r for r in rows if r.get("pct_chg") is not None]
     rows.sort(key=lambda x: x.get("pct_chg"), reverse=True)
-    top200 = rows[:100]  # keep key name for frontend compatibility
+    all_rows = rows[:]
+
+    # top lists (merged into 市场全貌模块)
+    top_100_gainers = all_rows[:100]
+    top_100_losers = sorted(all_rows, key=lambda x: x.get("pct_chg"))[:100]
+    top_100_turnover = sorted(
+        all_rows,
+        key=lambda x: (x.get("turnover_yi") is not None, x.get("turnover_yi") or -1),
+        reverse=True,
+    )[:100]
+
+    # keep key name for frontend compatibility
+    top200 = all_rows[:100]
 
     # fetch total_mv for all stocks on trade_date (paged), then fill Top200
     mv_map = {}
@@ -578,6 +622,12 @@ def main():
             "dominant_board": dominant_board,
             "dominant_pattern": dominant_pattern,
         },
+        "market_overview": {
+            "range_distribution": _build_pct_distribution_from_rows(all_rows),
+        },
+        "top_100_turnover": top_100_turnover,
+        "top_100_gainers": top_100_gainers,
+        "top_100_losers": top_100_losers,
         "top200": top200,
         "pattern_groups": pattern_groups,
     }
