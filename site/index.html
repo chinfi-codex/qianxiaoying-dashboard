@@ -139,11 +139,9 @@
         <h1>赚钱效应</h1>
         <span class="badge" id="asof">加载中…</span>
       </div>
-      <nav class="nav" aria-label="Primary">
-        <button id="tab-today" aria-current="page">今日概览</button>
-        <button id="tab-trend">持续性</button>
-        <button id="tab-archive">归档</button>
-      </nav>
+      <div class="nav" aria-label="Primary">
+        <span class="pill">单页复盘模式</span>
+      </div>
       <div class="toolbar" style="justify-content:flex-end;">
         <input id="datepick" type="date" />
         <button id="btn-load" class="pill" style="cursor:pointer;">Load</button>
@@ -159,7 +157,6 @@
   const $ = (sel) => document.querySelector(sel);
 
   const state = {
-    tab: 'today',
     latest: null,
     history: null,
   };
@@ -176,13 +173,7 @@
     return new Intl.NumberFormat('zh-CN').format(n);
   }
 
-  function setTab(tab) {
-    state.tab = tab;
-    $('#tab-today').setAttribute('aria-current', tab === 'today' ? 'page' : 'false');
-    $('#tab-trend').setAttribute('aria-current', tab === 'trend' ? 'page' : 'false');
-    $('#tab-archive').setAttribute('aria-current', tab === 'archive' ? 'page' : 'false');
-    render();
-  }
+  // single-page mode: no tab switcher
 
   function card(title, innerHtml, cls='card') {
     const el = document.createElement('section');
@@ -558,6 +549,90 @@
     return root;
   }
 
+  function renderMarket() {
+    const d = state.latest || {};
+    const root = document.createElement('div');
+    root.className = 'grid';
+
+    const rangeDist = d?.market_overview?.range_distribution || [];
+    const topTurn = d?.top_100_turnover || d?.top_turnover_100 || [];
+
+    root.appendChild(card('市场全貌（含 Top100）', `
+      <div class="muted">已合并 Top100 统计入口（去除 LLM 摘要，仅展示可复算统计与图表）。</div>
+    `, 'card full'));
+
+    root.appendChild(card('全市场涨跌幅分布', `
+      <div id="chart-range-dist" style="height:280px;"></div>
+    `, 'card half'));
+
+    root.appendChild(card('成交额Top100 涨跌分类', `
+      <div id="chart-top100-buckets" style="height:280px;"></div>
+    `, 'card half'));
+
+    setTimeout(() => {
+      if (!window.echarts) return;
+
+      const makeBar = (el, labels, values, colors=null) => {
+        if (!el) return;
+        const chart = echarts.init(el);
+        chart.setOption({
+          backgroundColor: 'transparent',
+          grid: { left: 40, right: 16, top: 12, bottom: 52 },
+          tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
+          xAxis: { type: 'category', data: labels, axisLabel: { color: 'rgba(231,234,242,.72)', rotate: 18 } },
+          yAxis: { type: 'value', axisLabel: { color: 'rgba(231,234,242,.72)' }, splitLine: { lineStyle: { color: 'rgba(255,255,255,.08)' } } },
+          series: [{ type: 'bar', data: values, itemStyle: colors ? { color: (p)=>colors[p.dataIndex] } : { color: 'rgba(110,231,255,.65)' } }]
+        });
+        window.addEventListener('resize', () => chart.resize(), { passive: true });
+      };
+
+      // range distribution
+      if (Array.isArray(rangeDist) && rangeDist.length) {
+        const labels = rangeDist.map(x => x.label || '—');
+        const values = rangeDist.map(x => Number(x.count || 0));
+        const colors = rangeDist.map(x => (Number(x.bucket_start || 0) >= 0 ? 'rgba(251,113,133,.75)' : 'rgba(74,222,128,.75)'));
+        makeBar($('#chart-range-dist'), labels, values, colors);
+      } else {
+        makeBar($('#chart-range-dist'), ['暂无数据'], [0]);
+      }
+
+      // top100 buckets
+      const rows = Array.isArray(topTurn) ? topTurn : [];
+      const pct = rows.map(r => Number(r.pct ?? r.pct_chg ?? NaN)).filter(v => !Number.isNaN(v));
+      const cats = ['小涨(2-5%)','中涨(5-9%)','大涨(>9%)','小跌(-2~-5%)','中跌(-5~-9%)','大跌(<-9%)','震荡(-2~2%)'];
+      const val = [0,0,0,0,0,0,0];
+      for (const p of pct) {
+        if (p >= 9) val[2]++;
+        else if (p >= 5) val[1]++;
+        else if (p >= 2) val[0]++;
+        else if (p <= -9) val[5]++;
+        else if (p <= -5) val[4]++;
+        else if (p <= -2) val[3]++;
+        else val[6]++;
+      }
+      makeBar($('#chart-top100-buckets'), cats, val);
+    }, 0);
+
+    return root;
+  }
+
+  function renderShort() {
+    const d = state.latest || {};
+    const root = document.createElement('div');
+    root.className = 'grid';
+
+    const zt = d?.short_effect?.zt_pool || [];
+    const dt = d?.short_effect?.dt_pool || [];
+    const lh = d?.short_effect?.longhu || [];
+
+    root.appendChild(card('短线效应', `
+      <div class="muted">短线数据（龙虎榜/涨停池/跌停池）将按迁移进度逐步补齐；当前优先打通结构与展示位。</div>
+      <div class="muted" style="margin-top:8px;">龙虎榜：${lh.length} 条；涨停池：${zt.length} 条；跌停池：${dt.length} 条</div>
+    `, 'card full'));
+
+    return root;
+  }
+
   function renderArchive() {
     const root = document.createElement('div');
     root.className = 'grid';
@@ -574,16 +649,14 @@
   function render() {
     const view = $('#view');
     view.innerHTML = '';
-    if (state.tab === 'today') view.appendChild(renderToday());
-    else if (state.tab === 'trend') view.appendChild(renderTrend());
-    else view.appendChild(renderArchive());
+    view.appendChild(renderToday());
+    view.appendChild(renderMarket());
+    view.appendChild(renderShort());
+    view.appendChild(renderTrend());
+    view.appendChild(renderArchive());
   }
 
   async function boot() {
-    $('#tab-today').addEventListener('click', () => setTab('today'));
-    $('#tab-trend').addEventListener('click', () => setTab('trend'));
-    $('#tab-archive').addEventListener('click', () => setTab('archive'));
-
     const url = new URL(location.href);
     const date = url.searchParams.get('date');
 
@@ -603,7 +676,8 @@
           const u = new URL(location.href);
           u.searchParams.set('date', d);
           history.replaceState(null, '', u.toString());
-          setTab('today');
+          render();
+          window.scrollTo({ top: 0, behavior: 'smooth' });
         } catch (e) {
           alert(`未找到数据：${d}`);
         }
