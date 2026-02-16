@@ -11,6 +11,7 @@ Output:
   site/data/YYYY-MM-DD.json
   site/data/latest.json
   site/data/index.json (append date)
+  MySQL daily_snapshot (optional)
 
 Notes:
 - Top200 is based on 前复权涨跌幅 (computed from close*adj_factor).
@@ -122,6 +123,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--date", help="target date YYYYMMDD (defaults: today)")
     ap.add_argument("--sleep", type=float, default=0.12, help="sleep between api calls")
+    ap.add_argument("--mysql", action="store_true", help="also upsert snapshot into local MySQL (daily_snapshot)")
     args = ap.parse_args()
 
     token = os.environ.get("TUSHARE_TOKEN")
@@ -598,6 +600,14 @@ def main():
         idx["dates"].sort(reverse=True)
     with open(index_path, "w", encoding="utf-8") as f:
         json.dump(idx, f, ensure_ascii=False, indent=2)
+
+    # optional: persist to MySQL for durability
+    if args.mysql:
+        try:
+            from db import upsert_daily_snapshot
+            upsert_daily_snapshot(date_key, out)
+        except Exception as e:
+            print("WARN mysql upsert failed:", e, file=sys.stderr)
 
     print("OK", date_key)
     return 0

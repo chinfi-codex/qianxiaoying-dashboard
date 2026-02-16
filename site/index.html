@@ -144,6 +144,10 @@
         <button id="tab-trend">持续性</button>
         <button id="tab-archive">归档</button>
       </nav>
+      <div class="toolbar" style="justify-content:flex-end;">
+        <input id="datepick" type="date" />
+        <button id="btn-load" class="pill" style="cursor:pointer;">Load</button>
+      </div>
     </div>
   </div>
 </header>
@@ -583,6 +587,39 @@
     const url = new URL(location.href);
     const date = url.searchParams.get('date');
 
+    // date picker defaults
+    const dp = $('#datepick');
+    if (dp && date) dp.value = date;
+
+    // Load button behavior: switch to 今日概览 after loading (boss choice: B)
+    const loadBtn = $('#btn-load');
+    if (loadBtn) {
+      loadBtn.addEventListener('click', async () => {
+        const d = dp?.value;
+        if (!d) return;
+        try {
+          state.latest = await fetchJson(`./data/${d}.json`);
+          $('#asof').textContent = `更新：${state.latest?.date ?? '—'}`;
+          const u = new URL(location.href);
+          u.searchParams.set('date', d);
+          history.replaceState(null, '', u.toString());
+          setTab('today');
+        } catch (e) {
+          alert(`未找到数据：${d}`);
+        }
+      });
+    }
+
+    // Enter to load
+    if (dp) {
+      dp.addEventListener('keydown', (ev) => {
+        if (ev.key === 'Enter') {
+          ev.preventDefault();
+          loadBtn?.click();
+        }
+      });
+    }
+
     try {
       state.history = await fetchJson('./data/index.json');
     } catch (e) {
@@ -596,6 +633,7 @@
         state.latest = await fetchJson('./data/latest.json');
       }
       $('#asof').textContent = `更新：${state.latest?.date ?? '—'}`;
+      if (dp && state.latest?.date && !dp.value) dp.value = state.latest.date;
     } catch (e) {
       state.latest = { date: null, conclusion: null, kpi: {}, top200: [] };
       $('#asof').textContent = '未找到数据（请先生成 data/latest.json）';
