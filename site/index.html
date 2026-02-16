@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>赚钱效应 · Dashboard</title>
   <meta name="description" content="A股赚钱效应：每日风格识别与持续性追踪" />
+  <meta name="theme-color" content="#f3f6fb" />
   <style>
     :root {
       --bg: #f3f6fb;
@@ -19,6 +20,16 @@
       --bad: #e53935;
     }
     * { box-sizing: border-box; }
+
+    html { color-scheme: light; }
+    a, button, input, select { -webkit-tap-highlight-color: rgba(41,98,255,.15); }
+    button, .pill { touch-action: manipulation; }
+    .sr-only { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0,0,0,0); white-space:nowrap; border:0; }
+    .skip-link { position: absolute; left: 12px; top: -40px; background: #1c2b4a; color: #fff; padding: 8px 10px; border-radius: 8px; z-index: 100; }
+    .skip-link:focus-visible { top: 10px; }
+    :focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
+    th, td { font-variant-numeric: tabular-nums; }
+
     body {
       margin: 0;
       font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji";
@@ -139,26 +150,28 @@
   </style>
 </head>
 <body>
+<a class="skip-link" href="#view">跳到主要内容</a>
 <header>
   <div class="wrap">
     <div class="topbar">
       <div class="brand">
         <h1>赚钱效应</h1>
-        <span class="badge" id="asof">加载中…</span>
+        <span class="badge" id="asof" aria-live="polite">加载中…</span>
       </div>
       <div class="nav" aria-label="Primary">
         <span class="pill">单页复盘模式</span>
       </div>
       <div class="toolbar" style="justify-content:flex-end;">
-        <input id="datepick" type="date" />
-        <button id="btn-load" class="pill" style="cursor:pointer;">Load</button>
+        <label for="datepick" class="sr-only">选择交易日</label>
+        <input id="datepick" type="date" name="trade_date" autocomplete="off" aria-label="选择交易日" />
+        <button id="btn-load" type="button" class="pill" style="cursor:pointer;" aria-label="加载所选交易日数据">Load</button>
       </div>
             <div class="muted" style="font-size:12px;">Load校验来源：MySQL导出的 db_dates.json + trade_calendar.json</div>
     </div>
   </div>
 </header>
 
-<main id="view"></main>
+<main id="view" tabindex="-1"></main>
 
 <script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
 <script>
