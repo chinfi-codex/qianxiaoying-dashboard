@@ -556,9 +556,20 @@
 
     const rangeDist = d?.market_overview?.range_distribution || [];
     const topTurn = d?.top_100_turnover || d?.top_turnover_100 || [];
+    const topGain = d?.top_100_gainers || [];
+    const topLoss = d?.top_100_losers || [];
+
+    const overlap = (() => {
+      const a = new Set(topTurn.map(x => String(x.ts_code || x.code || '')));
+      const b = new Set(topGain.map(x => String(x.ts_code || x.code || '')));
+      let c = 0;
+      for (const x of a) if (b.has(x) && x) c++;
+      return c;
+    })();
 
     root.appendChild(card('市场全貌（含 Top100）', `
       <div class="muted">已合并 Top100 统计入口（去除 LLM 摘要，仅展示可复算统计与图表）。</div>
+      <div class="muted" style="margin-top:8px;">样本：成交额Top100 ${topTurn.length}｜涨幅Top100 ${topGain.length}｜跌幅Top100 ${topLoss.length}｜成交额&涨幅交集 ${overlap}</div>
     `, 'card full'));
 
     root.appendChild(card('全市场涨跌幅分布', `
@@ -568,6 +579,28 @@
     root.appendChild(card('成交额Top100 涨跌分类', `
       <div id="chart-top100-buckets" style="height:280px;"></div>
     `, 'card half'));
+
+    const mkRows = (arr, title) => {
+      const rows = (arr || []).slice(0, 20).map((r, i) => {
+        const name = r.name || '—';
+        const code = r.ts_code || r.code || '—';
+        const pct = r.pct_chg ?? r.pct;
+        const amt = r.turnover_yi ?? (r.amount != null ? (Number(r.amount)/1e8).toFixed(2) : null);
+        return `<tr><td>${i+1}</td><td>${name}</td><td class="muted">${code}</td><td>${pct==null?'—':Number(pct).toFixed(2)}%</td><td>${amt==null?'—':amt}亿</td></tr>`;
+      }).join('');
+      return card(title, `
+        <div style="max-height:360px; overflow:auto;">
+          <table>
+            <thead><tr><th>#</th><th>名称</th><th>代码</th><th>涨跌幅</th><th>成交额</th></tr></thead>
+            <tbody>${rows || '<tr><td colspan="5" class="muted">暂无数据</td></tr>'}</tbody>
+          </table>
+        </div>
+      `, 'card third');
+    };
+
+    root.appendChild(mkRows(topTurn, '成交额Top100（前20）'));
+    root.appendChild(mkRows(topGain, '涨幅Top100（前20）'));
+    root.appendChild(mkRows(topLoss, '跌幅Top100（前20）'));
 
     setTimeout(() => {
       if (!window.echarts) return;
