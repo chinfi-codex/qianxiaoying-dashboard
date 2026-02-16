@@ -86,8 +86,24 @@ def main():
         # 1) refresh market history baseline from ch-stock csv -> mysql
         run(["python3.11", str(GEN / "import_market_history_csv.py")], timeout=180, cwd=str(ROOT))
 
-        # 2) generate + persist MySQL
-        run(["python3.11", str(GEN / "generate_daily.py"), "--date", today, "--sleep", "0.08", "--mysql"], timeout=1800, cwd=str(ROOT))
+        # 2) generate + persist MySQL (split + retry to avoid long single run)
+        attempts = [35, 25, 18]
+        last_err = None
+        for n in attempts:
+            try:
+                run([
+                    "python3.11", str(GEN / "generate_daily.py"),
+                    "--date", today,
+                    "--sleep", "0.05",
+                    "--pattern-top-n", str(n),
+                    "--mysql",
+                ], timeout=900, cwd=str(ROOT))
+                last_err = None
+                break
+            except Exception as e:
+                last_err = e
+        if last_err is not None:
+            raise last_err
 
         # 3) export latest/index
         run(["python3.11", str(GEN / "export_from_mysql.py"), "--latest", "--rebuild-index", "--limit", "500"], timeout=300, cwd=str(ROOT))

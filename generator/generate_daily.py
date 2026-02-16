@@ -207,6 +207,7 @@ def main():
     ap.add_argument("--date", help="target date YYYYMMDD (defaults: today)")
     ap.add_argument("--sleep", type=float, default=0.12, help="sleep between api calls")
     ap.add_argument("--mysql", action="store_true", help="also upsert snapshot into local MySQL (daily_snapshot)")
+    ap.add_argument("--pattern-top-n", type=int, default=35, help="max symbols for heavy pattern historical computation")
     args = ap.parse_args()
 
     token = os.environ.get("TUSHARE_TOKEN")
@@ -386,7 +387,8 @@ def main():
     # - limit-up / streak
     # -----------------
 
-    top_codes = [r["ts_code"] for r in top200]
+    # performance guard: heavy historical pattern computation only on top-N symbols
+    top_codes = [r["ts_code"] for r in top200][:max(1, int(args.pattern_top_n))]
 
     # history window: last 260 open days up to trade_date (for 250d features)
     hist_days = [d for d in open_days if d <= trade_date][-260:]
@@ -769,6 +771,8 @@ def main():
             })
     except Exception:
         pass
+
+    # no fallback by request: keep strict source from limit_list only
     try:
         lh = _post("top_list", token, {"trade_date": trade_date})
         for r in lh[:300]:
