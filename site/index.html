@@ -379,9 +379,152 @@
   function renderTrend() {
     const root = document.createElement('div');
     root.className = 'grid';
-    root.appendChild(card('风格持续性（占位）', `
-      <div class="muted">V1：显示近20日主导风格表 + 关键指标趋势图。</div>
+
+    root.appendChild(card('风格持续性（近20日）', `
+      <div class="muted">口径：读取每日 JSON 中的 dominant_board / dominant_pattern，并计算“主导形态连续天数”。</div>
+      <div class="toolbar" style="margin-top:10px;">
+        <button class="pill" id="trend-refresh">重新加载</button>
+        <span class="pill" id="trend-status">加载中…</span>
+      </div>
+      <div style="margin-top:12px; overflow:auto;">
+        <table>
+          <thead>
+            <tr>
+              <th>日期</th>
+              <th>主导板块</th>
+              <th>主导形态</th>
+              <th>形态连续（截至当日）</th>
+              <th>Top200中位市值(元)</th>
+              <th>Top200中位成交额(元)</th>
+              <th>结论</th>
+            </tr>
+          </thead>
+          <tbody id="trend-tbody"></tbody>
+        </table>
+      </div>
+      <div id="trend-empty" class="empty" style="display:none;">暂无可用历史数据（请先生成 data/YYYY-MM-DD.json）。</div>
     `, 'card full'));
+
+    root.appendChild(card('主导形态分布（近20日）', `
+      <div id="chart-trend-pattern" style="height:260px;"></div>
+      <div class="muted">统计口径：每日 dominant_pattern（忽略“—”）。</div>
+    `, 'card half'));
+
+    root.appendChild(card('主导板块分布（近20日）', `
+      <div id="chart-trend-board" style="height:260px;"></div>
+      <div class="muted">统计口径：每日 dominant_board。</div>
+    `, 'card half'));
+
+    // async hydrate
+    setTimeout(async () => {
+      const btn = $('#trend-refresh');
+      if (btn) btn.onclick = () => render();
+
+      const statusEl = $('#trend-status');
+      const tbody = $('#trend-tbody');
+      const emptyEl = $('#trend-empty');
+
+      const dates = (state.history?.dates ?? []).slice(0, 20);
+      const days = [];
+
+      // fetch each day; skip missing files to tolerate stale index.json
+      for (const d of dates) {
+        try {
+          const j = await fetchJson(`./data/${d}.json`);
+          days.push(j);
+        } catch (e) {
+          // ignore
+        }
+      }
+
+      if (!days.length) {
+        if (statusEl) statusEl.textContent = '无数据';
+        if (emptyEl) emptyEl.style.display = 'block';
+        return;
+      }
+
+      // sort desc by date
+      days.sort((a,b) => String(b.date).localeCompare(String(a.date)));
+
+      // compute streak (consecutive same dominant_pattern, from each day backwards)
+      const streakByDate = new Map();
+      for (let i = 0; i < days.length; i++) {
+        const p = days[i]?.kpi?.dominant_pattern ?? '—';
+        let s = 1;
+        for (let k = i + 1; k < days.length; k++) {
+          const pk = days[k]?.kpi?.dominant_pattern ?? '—';
+          if (pk === p && p !== '—') s++;
+          else break;
+        }
+        streakByDate.set(days[i].date, (p === '—') ? 0 : s);
+      }
+
+      // render table
+      if (tbody) {
+        tbody.innerHTML = days.map(d => {
+          const date = d?.date ?? '—';
+          const board = d?.kpi?.dominant_board ?? '—';
+          const pat = d?.kpi?.dominant_pattern ?? '—';
+          const streak = streakByDate.get(date) ?? 0;
+          const mv = fmt(d?.kpi?.median_mktcap_cny);
+          const turn = fmt(d?.kpi?.median_turnover_cny);
+          const concl = d?.conclusion ?? '';
+          return `
+            <tr>
+              <td><a href="?date=${encodeURIComponent(date)}">${date}</a></td>
+              <td>${board}</td>
+              <td>${pat}</td>
+              <td>${streak ? `${streak} 天` : '—'}</td>
+              <td>${mv}</td>
+              <td>${turn}</td>
+              <td class="muted">${concl}</td>
+            </tr>
+          `.trim();
+        }).join('');
+      }
+
+      if (statusEl) statusEl.textContent = `已加载 ${days.length} 天`;
+
+      // charts
+      if (window.echarts) {
+        const count = (arr, keyFn) => {
+          const m = new Map();
+          for (const x of arr) {
+            const k = keyFn(x);
+            if (!k) continue;
+            m.set(k, (m.get(k) || 0) + 1);
+          }
+          return Array.from(m.entries()).map(([k,v]) => ({ k, v })).sort((a,b) => b.v - a.v);
+        };
+
+        const patCnt = count(days, d => {
+          const p = d?.kpi?.dominant_pattern;
+          if (!p || p === '—') return null;
+          return p;
+        });
+        const boardCnt = count(days, d => d?.kpi?.dominant_board || '—');
+
+        const makeBar = (el, data) => {
+          const chart = echarts.init(el);
+          chart.setOption({
+            backgroundColor: 'transparent',
+            grid: { left: 40, right: 16, top: 12, bottom: 40 },
+            tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
+            xAxis: { type: 'category', data: data.map(x => x.k), axisLabel: { color: 'rgba(231,234,242,.72)', rotate: 20 } },
+            yAxis: { type: 'value', axisLabel: { color: 'rgba(231,234,242,.72)' }, splitLine: { lineStyle: { color: 'rgba(255,255,255,.08)' } } },
+            series: [{ type: 'bar', data: data.map(x => x.v), itemStyle: { color: 'rgba(110,231,255,.65)' } }]
+          });
+          window.addEventListener('resize', () => chart.resize(), { passive: true });
+        };
+
+        const pEl = $('#chart-trend-pattern');
+        const bEl = $('#chart-trend-board');
+        if (pEl) makeBar(pEl, patCnt.length ? patCnt : [{k:'—', v:0}]);
+        if (bEl) makeBar(bEl, boardCnt.length ? boardCnt : [{k:'—', v:0}]);
+      }
+
+    }, 0);
+
     return root;
   }
 
