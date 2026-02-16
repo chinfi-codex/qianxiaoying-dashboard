@@ -5,8 +5,9 @@
 import argparse
 import csv
 import os
-import re
 from datetime import datetime
+
+import requests
 
 from db import upsert_market_history_rows
 
@@ -43,6 +44,46 @@ def _to_date(s):
     return None
 
 
+def _fetch_financing_from_tushare(token, start_ymd, end_ymd):
+    """Return map: YYYY-MM-DD -> net_buy_wan (rzmre-rzche)."""
+    if not token:
+        return {}
+    api = "https://api.tushare.pro"
+    try:
+        r = requests.post(
+            api,
+            json={
+                "api_name": "margin",
+                "token": token,
+                "params": {"start_date": start_ymd, "end_date": end_ymd},
+                "fields": "trade_date,rzmre,rzche",
+            },
+            timeout=60,
+        )
+        r.raise_for_status()
+        j = r.json()
+        if j.get("code") != 0:
+            return {}
+        data = j.get("data") or {}
+        cols = data.get("fields") or []
+        items = data.get("items") or []
+        idx = {c: i for i, c in enumerate(cols)}
+        if "trade_date" not in idx:
+            return {}
+        m = {}
+        for it in items:
+            td = str(it[idx["trade_date"]])
+            d = _to_date(td)
+            if not d:
+                continue
+            rzmre = _to_float(it[idx.get("rzmre", -1)] if idx.get("rzmre") is not None else None) or 0.0
+            rzche = _to_float(it[idx.get("rzche", -1)] if idx.get("rzche") is not None else None) or 0.0
+            m[d] = m.get(d, 0.0) + (rzmre - rzche)
+        return m
+    except Exception:
+        return {}
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--csv", default="/home/admin/.openclaw/workspace/projects/ch-stock/datas/market_data.csv")
@@ -70,6 +111,14 @@ def main():
                 "financing_net_buy_wan": _to_float(r.get("融资净买入")),
                 "source": "ch_stock_csv",
             })
+
+    if rows:
+        start_ymd = min(r["trade_date"] for r in rows).replace("-", "")
+        end_ymd = max(r["trade_date"] for r in rows).replace("-", "")
+        fin_map = _fetch_financing_from_tushare(os.environ.get("TUSHARE_TOKEN"), start_ymd, end_ymd)
+        for r in rows:
+            if r["trade_date"] in fin_map:
+                r["financing_net_buy_wan"] = fin_map[r["trade_date"]]
 
     n = upsert_market_history_rows(rows)
     print(f"OK imported rows={len(rows)} affected={n}")

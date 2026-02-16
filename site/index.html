@@ -7,23 +7,23 @@
   <meta name="description" content="A股赚钱效应：每日风格识别与持续性追踪" />
   <style>
     :root {
-      --bg: #0b1020;
-      --panel: rgba(255,255,255,.06);
-      --panel2: rgba(255,255,255,.09);
-      --text: #e7eaf2;
-      --muted: rgba(231,234,242,.72);
-      --line: rgba(255,255,255,.12);
-      --brand: #6ee7ff;
-      --good: #4ade80;
-      --warn: #fbbf24;
-      --bad: #fb7185;
+      --bg: #f4f7ff;
+      --panel: #ffffff;
+      --panel2: #f8fbff;
+      --text: #1f2a44;
+      --muted: #5c6b8a;
+      --line: #dbe4ff;
+      --brand: #3b82f6;
+      --good: #22c55e;
+      --warn: #f59e0b;
+      --bad: #ef4444;
     }
     * { box-sizing: border-box; }
     body {
       margin: 0;
       font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji";
-      background: radial-gradient(900px 600px at 20% 0%, rgba(110,231,255,.10), transparent 60%),
-                  radial-gradient(900px 600px at 80% 10%, rgba(99,102,241,.12), transparent 55%),
+      background: radial-gradient(900px 600px at 15% -10%, rgba(59,130,246,.15), transparent 60%),
+                  radial-gradient(900px 600px at 85% -10%, rgba(16,185,129,.10), transparent 55%),
                   var(--bg);
       color: var(--text);
     }
@@ -33,7 +33,7 @@
       position: sticky;
       top: 0;
       backdrop-filter: blur(10px);
-      background: rgba(11,16,32,.65);
+      background: rgba(255,255,255,.88);
       border-bottom: 1px solid var(--line);
       z-index: 10;
     }
@@ -74,7 +74,7 @@
       background: var(--panel);
       border-radius: 14px;
       padding: 14px;
-      box-shadow: 0 12px 30px rgba(0,0,0,.18);
+      box-shadow: 0 8px 20px rgba(59,130,246,.10);
     }
     .card h2 { margin: 0 0 10px; font-size: 14px; color: var(--muted); font-weight: 600; }
     .hero { grid-column: 1 / -1; }
@@ -189,7 +189,6 @@
 
     root.appendChild(card('今日结论', `
       <p class="headline">${d?.conclusion ?? '（待生成）'}</p>
-      <p class="sub">建议：先跑通数据/口径与展示结构，图表在 V1 补全。</p>
     `, 'card hero'));
 
     const kpis = [
@@ -336,19 +335,19 @@
           });
           return chart;
         };
-        const mkBar2 = (el, s1, s2, n1, n2, c1, c2) => {
+        const mkLine2 = (el, s1, s2, n1, n2, c1, c2) => {
           if (!el) return null;
           const chart = echarts.init(el);
           chart.setOption({
             backgroundColor: 'transparent',
             grid: { left: 40, right: 16, top: 20, bottom: 32 },
-            tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
-            legend: { textStyle: { color: 'rgba(231,234,242,.72)' } },
-            xAxis: { type: 'category', data: dates, axisLabel: { color: 'rgba(231,234,242,.72)', rotate: 20 } },
-            yAxis: { type: 'value', axisLabel: { color: 'rgba(231,234,242,.72)' }, splitLine: { lineStyle: { color: 'rgba(255,255,255,.08)' } } },
+            tooltip: { trigger: 'axis', axisPointer: { type: 'line' } },
+            legend: { textStyle: { color: '#5c6b8a' } },
+            xAxis: { type: 'category', data: dates, axisLabel: { color: '#5c6b8a', rotate: 20 } },
+            yAxis: { type: 'value', axisLabel: { color: '#5c6b8a' }, splitLine: { lineStyle: { color: '#e5edff' } } },
             series: [
-              { name: n1, type: 'bar', data: s1, itemStyle: { color: c1 }, opacity: 0.8 },
-              { name: n2, type: 'bar', data: s2, itemStyle: { color: c2 }, opacity: 0.8 },
+              { name: n1, type: 'line', data: s1, smooth: false, symbol: 'circle', symbolSize: 4, lineStyle: { width: 2, color: c1 }, itemStyle: { color: c1 } },
+              { name: n2, type: 'line', data: s2, smooth: false, symbol: 'circle', symbolSize: 4, lineStyle: { width: 2, color: c2 }, itemStyle: { color: c2 } },
             ]
           });
           return chart;
@@ -357,8 +356,8 @@
         const cTurn = mkLine($('#chart-mh-turnover'), mh.map(x => x['成交额']), '成交额', '#4c6ef5');
         const cAct  = mkLine($('#chart-mh-activity'), mh.map(x => x['活跃度']), '情绪指数', '#f39c12');
         const cFin  = mkLine($('#chart-mh-fin'), mh.map(x => x['融资净买入']), '融资净买入', '#16a085');
-        const cUD   = mkBar2($('#chart-mh-updown'), mh.map(x => x['上涨']), mh.map(x => x['下跌']), '上涨家数', '下跌家数', '#2ecc71', '#e74c3c');
-        const cLim  = mkBar2($('#chart-mh-limit'), mh.map(x => x['涨停']), mh.map(x => x['跌停']), '涨停数', '跌停数', '#e74c3c', '#3498db');
+        const cUD   = mkLine2($('#chart-mh-updown'), mh.map(x => x['上涨']), mh.map(x => x['下跌']), '上涨家数', '下跌家数', '#22c55e', '#ef4444');
+        const cLim  = mkLine2($('#chart-mh-limit'), mh.map(x => x['涨停']), mh.map(x => x['跌停']), '涨停数', '跌停数', '#ef4444', '#3b82f6');
 
         window.addEventListener('resize', () => {
           cap.resize(); turn.resize(); pat.resize();
@@ -746,8 +745,6 @@
     view.appendChild(renderToday());
     view.appendChild(renderMarket());
     view.appendChild(renderShort());
-    view.appendChild(renderTrend());
-    view.appendChild(renderArchive());
   }
 
   async function boot() {
