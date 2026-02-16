@@ -253,21 +253,46 @@
       function renderCharts() {
         if (!window.echarts) return;
 
-        const makePie = (el, data, title) => {
+        const normalizeLabel = (k) => {
+          if (k == null) return '未归类';
+          if (k === '—') return '未归类';
+          return k;
+        };
+
+        const makeBar = (el, data, title, order) => {
+          const items = (data || []).map(x => ({ k: normalizeLabel(x.k), v: x.v || 0 }));
+          const hasUnk = items.some(x => x.k === '未归类');
+          if (!hasUnk) items.push({ k: '未归类', v: 0 });
+
+          // keep order if provided
+          if (order && order.length) {
+            const ord = order.map(normalizeLabel);
+            items.sort((a,b) => ord.indexOf(a.k) - ord.indexOf(b.k));
+          } else {
+            items.sort((a,b) => b.v - a.v);
+          }
+
           const chart = echarts.init(el);
           chart.setOption({
             backgroundColor: 'transparent',
-            tooltip: { trigger: 'item' },
-            legend: { top: 8, textStyle: { color: 'rgba(231,234,242,.72)' } },
+            tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
+            grid: { left: 40, right: 16, top: 12, bottom: 44 },
+            xAxis: {
+              type: 'category',
+              data: items.map(x => x.k),
+              axisLabel: { color: 'rgba(231,234,242,.72)', rotate: 18 },
+              axisLine: { lineStyle: { color: 'rgba(255,255,255,.12)' } },
+            },
+            yAxis: {
+              type: 'value',
+              axisLabel: { color: 'rgba(231,234,242,.72)' },
+              splitLine: { lineStyle: { color: 'rgba(255,255,255,.08)' } },
+            },
             series: [{
               name: title,
-              type: 'pie',
-              radius: ['35%','70%'],
-              center: ['50%','60%'],
-              avoidLabelOverlap: true,
-              itemStyle: { borderColor: 'rgba(11,16,32,.65)', borderWidth: 2 },
-              label: { color: 'rgba(231,234,242,.82)' },
-              data: data.map(x => ({ name: x.k, value: x.v }))
+              type: 'bar',
+              data: items.map(x => x.v),
+              itemStyle: { color: 'rgba(110,231,255,.65)' }
             }]
           });
           return chart;
@@ -275,11 +300,12 @@
 
         const capData = countBy(r => r.cap_bucket, ['微盘','中盘','大盘','—']);
         const turnData = countBy(r => r.turn_bucket, ['>10亿','3-10亿','<3亿','—']);
-        const patData = countBy(r => r.pattern).filter(x => x.k !== '—');
+        // pattern: include 未归类（原先被 filter 掉了）
+        const patData = countBy(r => r.pattern);
 
-        const cap = makePie($('#chart-cap'), capData, '市值分层');
-        const turn = makePie($('#chart-turn'), turnData, '成交额分层');
-        const pat = makePie($('#chart-pattern'), patData.length ? patData : [{k:'—',v:1}], '形态分布');
+        const cap = makeBar($('#chart-cap'), capData, '市值分层', ['微盘','中盘','大盘','未归类']);
+        const turn = makeBar($('#chart-turn'), turnData, '成交额分层', ['>10亿','3-10亿','<3亿','未归类']);
+        const pat = makeBar($('#chart-pattern'), patData, '形态分布');
 
         window.addEventListener('resize', () => { cap.resize(); turn.resize(); pat.resize(); }, { passive: true });
       }
