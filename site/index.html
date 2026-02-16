@@ -191,6 +191,26 @@
       <p class="headline">${d?.conclusion ?? '（待生成）'}</p>
     `, 'card hero'));
 
+    root.appendChild(card('1) 外盘数据', `<div class="muted">BTC / XAU / 美债10Y（无LLM，纯数据）。</div>`, 'card full'));
+    const ex = d?.external || {};
+    const exKpis = [
+      { t: 'BTC', v: ex?.btc?.value == null ? '—' : `$${fmt(Math.round(ex.btc.value))}`, d: ex?.btc?.change == null ? '—' : `${Number(ex.btc.change).toFixed(2)}%` },
+      { t: 'XAU', v: ex?.xau?.value == null ? '—' : `${Number(ex.xau.value).toFixed(2)}`, d: ex?.xau?.change == null ? '—' : `${Number(ex.xau.change).toFixed(2)}%` },
+      { t: 'US10Y', v: ex?.us10y?.value == null ? '—' : `${Number(ex.us10y.value).toFixed(2)}%`, d: ex?.us10y?.change == null ? '—' : `${Number(ex.us10y.change).toFixed(1)}bp` },
+    ];
+    for (const k of exKpis) {
+      const el = document.createElement('section');
+      el.className = 'card kpi';
+      el.innerHTML = `<h2>${k.t}</h2><div class="v">${k.v}</div><div class="d">日变动: ${k.d}</div>`;
+      root.appendChild(el);
+    }
+
+    root.appendChild(card('2) 大盘数据', `<div class="muted">三大指数K线 + 历史趋势（按 app.py 口径迁移）。</div>`, 'card full'));
+    root.appendChild(card('上证指数（近120）', `<div id="chart-idx-sh" style="height:260px;"></div>`, 'card third'));
+    root.appendChild(card('创业板指数（近120）', `<div id="chart-idx-cyb" style="height:260px;"></div>`, 'card third'));
+    root.appendChild(card('科创板指数（近120）', `<div id="chart-idx-kcb" style="height:260px;"></div>`, 'card third'));
+    root.appendChild(card('创业板PE（近500）', `<div id="chart-gem-pe" style="height:260px;"></div>`, 'card full'));
+
     const kpis = [
       { t: 'Top200 中位市值（元）', v: fmt(d?.kpi?.median_mktcap_cny), d: '市值口径：总市值；分层：<50亿 / 50-200亿 / >200亿' },
       { t: 'Top200 中位成交额（元）', v: fmt(d?.kpi?.median_turnover_cny), d: '分层：>10亿 / 3-10亿 / <3亿' },
@@ -359,9 +379,46 @@
         const cUD   = mkLine2($('#chart-mh-updown'), mh.map(x => x['上涨']), mh.map(x => x['下跌']), '上涨家数', '下跌家数', '#22c55e', '#ef4444');
         const cLim  = mkLine2($('#chart-mh-limit'), mh.map(x => x['涨停']), mh.map(x => x['跌停']), '涨停数', '跌停数', '#ef4444', '#3b82f6');
 
+        const mkK = (el, arr) => {
+          if (!el) return null;
+          if (!Array.isArray(arr) || !arr.length) return null;
+          const dates = arr.map(x => x.date);
+          const vals = arr.map(x => [x.open, x.close, x.low, x.high]);
+          const chart = echarts.init(el);
+          chart.setOption({
+            backgroundColor: 'transparent',
+            grid: { left: 30, right: 10, top: 10, bottom: 25 },
+            xAxis: { type: 'category', data: dates, axisLabel: { show: false } },
+            yAxis: { scale: true, axisLabel: { color: '#5c6b8a' }, splitLine: { lineStyle: { color: '#e5edff' } } },
+            tooltip: { trigger: 'axis' },
+            series: [{ type: 'candlestick', data: vals, itemStyle: { color: '#ef4444', color0: '#22c55e', borderColor: '#ef4444', borderColor0: '#22c55e' } }]
+          });
+          return chart;
+        };
+
+        const idx = d?.indices || {};
+        const cIdxSh = mkK($('#chart-idx-sh'), idx.sh || []);
+        const cIdxC = mkK($('#chart-idx-cyb'), idx.cyb || []);
+        const cIdxK = mkK($('#chart-idx-kcb'), idx.kcb || []);
+
+        let cGem = null;
+        const gem = Array.isArray(d?.gem_pe) ? d.gem_pe : [];
+        if ($('#chart-gem-pe')) {
+          cGem = echarts.init($('#chart-gem-pe'));
+          cGem.setOption({
+            backgroundColor: 'transparent',
+            grid: { left: 40, right: 16, top: 20, bottom: 32 },
+            tooltip: { trigger: 'axis', axisPointer: { type: 'line' } },
+            xAxis: { type: 'category', data: gem.map(x => x.date), axisLabel: { color: '#5c6b8a', rotate: 20 } },
+            yAxis: { type: 'value', axisLabel: { color: '#5c6b8a' }, splitLine: { lineStyle: { color: '#e5edff' } } },
+            series: [{ type: 'line', data: gem.map(x => x.pe), symbol: 'none', lineStyle: { width: 2, color: '#3b82f6' } }]
+          });
+        }
+
         window.addEventListener('resize', () => {
           cap.resize(); turn.resize(); pat.resize();
           cTurn && cTurn.resize(); cAct && cAct.resize(); cFin && cFin.resize(); cUD && cUD.resize(); cLim && cLim.resize();
+          cIdxSh && cIdxSh.resize(); cIdxC && cIdxC.resize(); cIdxK && cIdxK.resize(); cGem && cGem.resize();
         }, { passive: true });
       }
 
@@ -718,10 +775,79 @@
     const dt = d?.short_effect?.dt_pool || [];
     const lh = d?.short_effect?.longhu || [];
 
-    root.appendChild(card('短线效应', `
-      <div class="muted">短线数据（龙虎榜/涨停池/跌停池）将按迁移进度逐步补齐；当前优先打通结构与展示位。</div>
-      <div class="muted" style="margin-top:8px;">龙虎榜：${lh.length} 条；涨停池：${zt.length} 条；跌停池：${dt.length} 条</div>
+    const parseStreak = (x) => {
+      if (x == null) return null;
+      const s = String(x);
+      const m = s.match(/(\d+)/);
+      if (m) return Number(m[1]);
+      if (s.includes('首')) return 1;
+      return null;
+    };
+    const ztStreak = zt.map(x => parseStreak(x.up_stat)).filter(x => x != null);
+    const ztMax = ztStreak.length ? Math.max(...ztStreak) : 0;
+    const ztLB = ztStreak.filter(x => x >= 2).length;
+    const ztBroken = zt.filter(x => Number(x.open_times || 0) > 0).length;
+    const ztBreakRate = zt.length ? (ztBroken / zt.length * 100) : 0;
+
+    root.appendChild(card('4) 短线效应（涨停/跌停/龙虎榜）', `
+      <div class="muted">龙虎榜：${lh.length} 条；涨停池：${zt.length} 条；跌停池：${dt.length} 条</div>
     `, 'card full'));
+
+    const metrics = [
+      {t:'连板股家数', v: ztLB},
+      {t:'连板高度', v: ztMax},
+      {t:'涨停炸板率', v: `${ztBreakRate.toFixed(1)}%`},
+      {t:'炸板家数', v: ztBroken},
+    ];
+    for (const m of metrics) {
+      const el = document.createElement('section');
+      el.className = 'card kpi';
+      el.innerHTML = `<h2>${m.t}</h2><div class="v">${m.v}</div>`;
+      root.appendChild(el);
+    }
+
+    root.appendChild(card('连板高度-家数分布', `<div id="chart-zt-tier" style="height:260px;"></div>`, 'card half'));
+    root.appendChild(card('连续跌停高度-家数分布', `<div id="chart-dt-tier" style="height:260px;"></div>`, 'card half'));
+
+    const mkTable = (title, arr) => {
+      const rows = (arr || []).slice(0, 20).map((r, i) => {
+        const name = r.name || '—'; const code = r.ts_code || '—';
+        const pct = r.pct_chg == null ? '—' : `${Number(r.pct_chg).toFixed(2)}%`;
+        const net = r.net_amount == null ? '—' : Number(r.net_amount).toLocaleString('zh-CN');
+        return `<tr><td>${i+1}</td><td>${name}</td><td class="muted">${code}</td><td>${pct}</td><td>${net}</td></tr>`;
+      }).join('');
+      return card(title, `<div style="max-height:360px;overflow:auto;"><table><thead><tr><th>#</th><th>名称</th><th>代码</th><th>涨跌幅</th><th>净额</th></tr></thead><tbody>${rows || '<tr><td colspan="5" class="muted">暂无数据</td></tr>'}</tbody></table></div>`, 'card third');
+    };
+
+    root.appendChild(mkTable('龙虎榜（前20）', lh));
+    root.appendChild(mkTable('涨停池（前20）', zt));
+    root.appendChild(mkTable('跌停池（前20）', dt));
+
+    setTimeout(() => {
+      if (!window.echarts) return;
+      const countMap = (vals) => {
+        const m = new Map();
+        for (const v of vals) m.set(v, (m.get(v) || 0) + 1);
+        return Array.from(m.entries()).sort((a,b)=>a[0]-b[0]);
+      };
+      const ztPairs = countMap(ztStreak);
+      const dtPairs = countMap(dt.map(x => parseStreak(x.up_stat || x.cont_streak || x.open_times)).filter(x => x != null));
+      const mkBar = (el, pairs, c) => {
+        if (!el) return null;
+        const ch = echarts.init(el);
+        ch.setOption({
+          backgroundColor: 'transparent', grid: { left: 40, right: 16, top: 20, bottom: 32 },
+          tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
+          xAxis: { type: 'category', data: pairs.map(x => `${x[0]}板`), axisLabel: { color: '#5c6b8a' } },
+          yAxis: { type: 'value', axisLabel: { color: '#5c6b8a' }, splitLine: { lineStyle: { color: '#e5edff' } } },
+          series: [{ type: 'bar', data: pairs.map(x => x[1]), itemStyle: { color: c } }]
+        });
+        window.addEventListener('resize', ()=>ch.resize(), { passive: true });
+        return ch;
+      };
+      mkBar($('#chart-zt-tier'), ztPairs, '#3b82f6');
+      mkBar($('#chart-dt-tier'), dtPairs, '#22c55e');
+    }, 0);
 
     return root;
   }

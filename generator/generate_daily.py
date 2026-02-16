@@ -25,6 +25,7 @@ import json
 import os
 import sys
 import time
+import math
 
 try:
     import requests
@@ -149,6 +150,56 @@ def _load_json(path, default):
         return default
     with open(path, "r", encoding="utf-8") as f:
         return json.load(f)
+
+
+def _safe_float(x):
+    try:
+        if x is None:
+            return None
+        v = float(x)
+        if math.isnan(v) or math.isinf(v):
+            return None
+        return v
+    except Exception:
+        return None
+
+
+def _fetch_alpha_vantage_daily(series_type, api_key, **params):
+    """Return list[(date,value)] asc; series_type: 'close' or 'value'."""
+    if not api_key:
+        return []
+    try:
+        import requests
+        q = dict(params)
+        q["apikey"] = api_key
+        r = requests.get("https://www.alphavantage.co/query", params=q, timeout=40)
+        r.raise_for_status()
+        j = r.json()
+        # pick first object that looks like timeseries
+        ts = None
+        for k, v in j.items():
+            if isinstance(v, dict) and "Time" in k:
+                ts = v
+                break
+        if not ts:
+            return []
+        out = []
+        for d, row in ts.items():
+            if not isinstance(row, dict):
+                continue
+            val = None
+            if series_type == "close":
+                val = row.get("4. close") or row.get("4b. close (USD)") or row.get("4a. close (USD)")
+            else:
+                # treasury_yield uses 'value'
+                val = row.get("value")
+            fv = _safe_float(val)
+            if fv is not None:
+                out.append((d, fv))
+        out.sort(key=lambda x: x[0])
+        return out
+    except Exception:
+        return []
 
 
 def main():
@@ -613,6 +664,121 @@ def main():
             })
         pattern_groups[p] = grp
 
+    # --- external data (no LLM) ---
+    av_key = os.environ.get("ALPHAVANTAGE_API_KEY")
+    btc_ts = _fetch_alpha_vantage_daily("close", av_key, function="DIGITAL_CURRENCY_DAILY", symbol="BTC", market="USD")
+    xau_ts = _fetch_alpha_vantage_daily("close", av_key, function="FX_DAILY", from_symbol="XAU", to_symbol="USD")
+    us10y_ts = _fetch_alpha_vantage_daily("value", av_key, function="TREASURY_YIELD", maturity="10year", interval="daily")
+
+    def _pack_metric(ts, change_kind="pct", keep=120):
+        if not ts:
+            return None
+        ts = ts[-keep:]
+        cur = ts[-1][1]
+        prev = ts[-2][1] if len(ts) >= 2 else None
+        chg = None
+        if prev is not None:
+            if change_kind == "bp":
+                chg = (cur - prev) * 100.0
+            else:
+                chg = (cur / prev - 1.0) * 100.0 if prev != 0 else None
+        return {
+            "date": ts[-1][0],
+            "value": round(cur, 4),
+            "prev_value": round(prev, 4) if prev is not None else None,
+            "change": round(chg, 4) if chg is not None else None,
+            "series": [{"date": d, "value": v} for d, v in ts],
+        }
+
+    external = {
+        "btc": _pack_metric(btc_ts, "pct", 120),
+        "xau": _pack_metric(xau_ts, "pct", 120),
+        "us10y": _pack_metric(us10y_ts, "bp", 120),
+    }
+
+    # --- index klines (app.py-compatible structure) ---
+    def _idx_kline(code, days=120):
+        try:
+            rows = _post(
+                "index_daily",
+                token,
+                {"ts_code": code, "start_date": hist_start, "end_date": trade_date},
+                fields="trade_date,open,high,low,close,vol,amount",
+            )
+        except Exception:
+            rows = []
+        if not rows:
+            return []
+        rows = sorted(rows, key=lambda x: x.get("trade_date"))[-days:]
+        outk = []
+        for r in rows:
+            td = r.get("trade_date")
+            outk.append({
+                "date": _to_date_ymd(td) if td else None,
+                "open": _safe_float(r.get("open")),
+                "high": _safe_float(r.get("high")),
+                "low": _safe_float(r.get("low")),
+                "close": _safe_float(r.get("close")),
+                "volume": _safe_float(r.get("vol")),
+                "amount": _safe_float(r.get("amount")),
+            })
+        return outk
+
+    indices = {
+        "sh": _idx_kline("000001.SH", 120),
+        "cyb": _idx_kline("399006.SZ", 120),
+        "kcb": _idx_kline("000688.SH", 120),
+    }
+
+    # --- gem pe (near 500 trade days) ---
+    gem_pe = []
+    try:
+        di = _post(
+            "daily_info",
+            token,
+            {"ts_code": "SZ_GEM", "start_date": open_days[-1000] if len(open_days) >= 1000 else open_days[0], "end_date": trade_date},
+            fields="trade_date,pe",
+        )
+        di = sorted(di, key=lambda x: x.get("trade_date"))[-500:]
+        for r in di:
+            p = _safe_float(r.get("pe"))
+            td = r.get("trade_date")
+            if p is None or not td:
+                continue
+            gem_pe.append({"date": _to_date_ymd(td), "pe": p})
+    except Exception:
+        gem_pe = []
+
+    # --- short effects (zt/dt/longhu simplified from Tushare) ---
+    short_effect = {"zt_pool": [], "dt_pool": [], "longhu": []}
+    try:
+        zt = _post("limit_list", token, {"trade_date": trade_date, "limit_type": "U"})
+        for r in zt[:300]:
+            short_effect["zt_pool"].append({
+                "ts_code": r.get("ts_code"), "name": r.get("name"), "pct_chg": _safe_float(r.get("pct_chg")),
+                "amount": _safe_float(r.get("amount")), "up_stat": r.get("up_stat"), "open_times": r.get("open_times"),
+            })
+    except Exception:
+        pass
+    try:
+        dtp = _post("limit_list", token, {"trade_date": trade_date, "limit_type": "D"})
+        for r in dtp[:300]:
+            short_effect["dt_pool"].append({
+                "ts_code": r.get("ts_code"), "name": r.get("name"), "pct_chg": _safe_float(r.get("pct_chg")),
+                "amount": _safe_float(r.get("amount")), "open_times": r.get("open_times"),
+            })
+    except Exception:
+        pass
+    try:
+        lh = _post("top_list", token, {"trade_date": trade_date})
+        for r in lh[:300]:
+            short_effect["longhu"].append({
+                "ts_code": r.get("ts_code"), "name": r.get("name"), "net_amount": _safe_float(r.get("net_amount")),
+                "buy": _safe_float(r.get("l_buy")), "sell": _safe_float(r.get("l_sell")), "reason": r.get("reason"),
+            })
+    except Exception:
+        pass
+
     out = {
         "date": _to_date_ymd(trade_date),
         "conclusion": concl,
@@ -622,6 +788,10 @@ def main():
             "dominant_board": dominant_board,
             "dominant_pattern": dominant_pattern,
         },
+        "external": external,
+        "indices": indices,
+        "gem_pe": gem_pe,
+        "short_effect": short_effect,
         "market_overview": {
             "range_distribution": _build_pct_distribution_from_rows(all_rows),
         },
